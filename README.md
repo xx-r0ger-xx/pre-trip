@@ -14,6 +14,10 @@ American Truck Simulator controller bindings.
   installed, disabled (parked in `mod_disabled`, so the game ignores them) or sent to the Recycle Bin.
   Workshop titles come from Steam's public API and are cached in `TruckSim-Configs\workshop_cache.json`.
   Activation and load order still happen in the game's own Mod Manager.
+- **Install mods** – one window with three ways in: paste a Steam Workshop link (checked against the
+  selected game, then subscribed through the game's own Steam API), pick `.scs`/`.zip` files from your
+  Downloads folder, or **Browse for files…**. You can also drag mod files onto the window. Zips that
+  only wrap `.scs` files are unpacked, because the game can't load them wrapped.
 - **Cleanup** – finds cloud-sync leftovers (`(# Name clash …)`, ` - Copy`, `-DESKTOP-…`) in the game
   folders and moves them to `TruckSim-Configs\quarantine\<timestamp>` with a manifest. Nothing is
   deleted. Also flags profiles missing `profile.sii` / `config_local.cfg` / saves.

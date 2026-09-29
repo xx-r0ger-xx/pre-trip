@@ -129,6 +129,7 @@ class App(tk.Tk):
         self.show_page("compare")
 
         T.dark_titlebar(self)
+        T.enable_file_drop(self, self.on_drop)
         self.startup_check()
         self.refresh_all()
         self.refresh_cleanup()
@@ -955,18 +956,180 @@ class App(tk.Tk):
                      + ("  It was active, so save the load order to drop it from the game's list." if was_active else ""))
         self.guard(run)
 
+    def install_paths(self, g, paths, parent=None):
+        """Install files one by one so a single bad file doesn't stop the rest. Returns installed file names."""
+        done, errors = [], []
+        for p in paths:
+            try:
+                done += [d.name for d in mods.install(g, Path(p))]
+            except Exception as e:
+                errors.append(f"{Path(p).name}: {e}")
+        if done:
+            self.refresh_mods()
+            self.say(f"Installed {', '.join(done)} for {g.key.upper()}.  Turn it on here, then Save to game.")
+        if errors:
+            T.error(parent or self, "Some files weren't installed", "\n".join(errors))
+        return done
+
+    def on_drop(self, paths):
+        files = [p for p in paths if Path(p).suffix.lower() in mods.MOD_EXT or Path(p).is_dir()]
+        if not files:
+            T.info(self, "Nothing to install", "Drop .scs or .zip mod files to install them.")
+            return
+        self.show_page("mods")
+        g = core.GAMES[self.mod_game.get()]
+        other = [Path(p).name for p in files if mods._game_hint(Path(p).name) not in (None, g.key)]
+        if not T.confirm(self, f"Install {len(files)} mod(s) for {g.key.upper()}?",
+                         f"They'll be copied into {mods.mod_dir(g)}. Zips that only wrap .scs files are unpacked."
+                         + (f"\n\n{', '.join(other)} looks like it's for the other game - switch the game "
+                            "selector first if so." if other else ""),
+                         ok="Install", detail="\n".join(Path(p).name for p in files)):
+            return
+        self.install_paths(g, files)
+
     def install_mod(self):
         g = core.GAMES[self.mod_game.get()]
-        paths = filedialog.askopenfilenames(parent=self, title=f"Install mods for {g.title}",
-                                            filetypes=[("SCS mods", "*.scs *.zip"), ("All files", "*.*")])
-        if not paths:
-            return
+        win = tk.Toplevel(self, bg=T.SURFACE)
+        win.withdraw()
+        win.title("Install mods")
+        win.transient(self)
+        win.geometry("820x640")
+        win.minsize(700, 520)
+        tk.Frame(win, bg=T.ACCENT, height=3).pack(fill="x")
 
-        def run():
-            done = [mods.install(g, Path(p)).name for p in paths]
-            self.refresh_mods()
-            self.say(f"Installed {', '.join(done)} into {mods.mod_dir(g)}. Turn it on here or in the game.")
-        self.guard(run)
+        foot = tk.Frame(win, bg=T.BG, padx=18, pady=14)
+        foot.pack(side="bottom", fill="x")
+        body = tk.Frame(win, bg=T.SURFACE, padx=26, pady=20)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text=f"Install mods for {g.title}", font=T.H2, bg=T.SURFACE, fg=T.TEXT).pack(anchor="w")
+        tk.Label(body, text="Subscribe with a Workshop link, pick a downloaded file, or drag .scs / .zip files "
+                            "straight onto the Mods page.", font=T.UI, bg=T.SURFACE, fg=T.MUTED).pack(anchor="w",
+                                                                                                    pady=(4, 0))
+
+        # --- Workshop link ---
+        tk.Label(body, text="STEAM WORKSHOP LINK", font=T.CAPS, bg=T.SURFACE, fg=T.FAINT).pack(anchor="w", pady=(18, 6))
+        wrow = tk.Frame(body, bg=T.SURFACE)
+        wrow.pack(fill="x")
+        link = tk.StringVar()
+        entry = ttk.Entry(wrow, textvariable=link, font=T.UI)
+        entry.pack(side="left", fill="x", expand=True)
+        wstatus = tk.Label(body, font=T.SMALL, bg=T.SURFACE, fg=T.FAINT, anchor="w", justify="left",
+                           text="Paste a link like steamcommunity.com/sharedfiles/filedetails/?id=…  or just the ID.")
+        wstatus.pack(fill="x", pady=(6, 0))
+
+        def subscribe():
+            wid = mods.parse_workshop_id(link.get())
+            if not wid:
+                wstatus.config(text="That isn't a Workshop link or item ID.", fg=T.DANGER)
+                return
+            if any(m.workshop_id == wid for m in self.mod_list):
+                wstatus.config(text="You're already subscribed to that item.", fg=T.ACCENT)
+                return
+            wstatus.config(text="Looking it up on Steam…", fg=T.MUTED)
+            win.update_idletasks()
+            try:
+                item = mods.workshop_item(wid)
+            except Exception as e:
+                wstatus.config(text=f"Couldn't look it up: {e}", fg=T.DANGER)
+                return
+            if item["app"] != mods.STEAM_APP[g.key]:
+                owner = next((k for k, a in mods.STEAM_APP.items() if a == item["app"]), None)
+                wstatus.config(text=f"“{item['title']}” is " + (f"a {owner.upper()} mod - switch the game selector "
+                                    "on the Mods page first." if owner else "not an ETS2/ATS item."), fg=T.DANGER)
+                return
+            if not T.confirm(win, f"Subscribe to {item['title']}?",
+                             f"Steam will download it for {g.title} ({mods.fmt_size(item['size'])}). Steam may show "
+                             "the game as running for a few seconds while this happens.", ok="Subscribe"):
+                wstatus.config(text="Cancelled.", fg=T.FAINT)
+                return
+            wstatus.config(text="Asking Steam to subscribe…", fg=T.MUTED)
+            win.update_idletasks()
+            try:
+                steamugc.subscribe(g, [wid])
+            except Exception as e:
+                wstatus.config(text=str(e), fg=T.DANGER)
+                return
+            link.set("")
+            wstatus.config(text=f"Subscribed to “{item['title']}”. Steam is downloading it - it appears in the list "
+                                "once the download finishes (Rescan).", fg="#3ecf8e")
+            self.say(f"Subscribed to {item['title']}.  Rescan once Steam finishes downloading.")
+            self.after(8000, self.refresh_mods)
+
+        T.Button(wrow, "Subscribe", subscribe, kind="secondary", icon=T.I_GLOBE, pady=5).pack(side="left", padx=(8, 0))
+        entry.bind("<Return>", lambda e: subscribe())
+
+        # --- Downloads ---
+        folder = mods.downloads_dir()
+        tk.Label(body, text=f"FROM DOWNLOADS  ·  {folder}", font=T.CAPS, bg=T.SURFACE, fg=T.FAINT).pack(
+            anchor="w", pady=(20, 6))
+        tf = bordered(body, T.RAISED)
+        tf.pack(fill="both", expand=True)
+        cols = (("name", "FILE", 300, True, "w"), ("what", "CONTAINS", 130, False, "w"),
+                ("size", "SIZE", 80, False, "e"), ("date", "DOWNLOADED", 120, False, "w"),
+                ("state", "STATUS", 110, False, "w"))
+        tree = ttk.Treeview(tf, columns=[c[0] for c in cols], show="headings", selectmode="extended", height=8)
+        for c, t, w, stretch, anchor in cols:
+            tree.heading(c, text=t, anchor=anchor)
+            tree.column(c, width=w, minwidth=w if not stretch else 160, stretch=stretch, anchor=anchor)
+        tree.tag_configure("odd", background=T.STRIPE)
+        tree.tag_configure("installed", foreground=T.FAINT)
+        tree.tag_configure("other", foreground=T.ACCENT)
+        sb = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        tree.pack(fill="both", expand=True)
+        empty = tk.Label(tf, bg=T.SURFACE, fg=T.MUTED, font=T.UI,
+                         text="No .scs or .zip mods in your Downloads folder.")
+        rows = {}
+
+        def load():
+            tree.delete(*tree.get_children())
+            rows.clear()
+            for i, d in enumerate(mods.find_downloads(g, folder)):
+                tags = ["odd"] if i % 2 else []
+                other = d.game_hint not in (None, g.key)
+                state = "Installed" if d.installed else (f"For {d.game_hint.upper()}?" if other else "Ready")
+                tags += ["installed"] if d.installed else ["other"] if other else []
+                what = "Mod" if d.kind == "mod" else f"Zip · {len(d.inner)} .scs inside"
+                rows[tree.insert("", "end", tags=tags, values=(
+                    d.path.name, what, mods.fmt_size(d.size),
+                    datetime.fromtimestamp(d.modified).strftime("%b %d, %Y"), state))] = d
+            if rows:
+                empty.place_forget()
+            else:
+                empty.place(relx=0.5, rely=0.5, anchor="center")
+            refresh_btn()
+
+        def refresh_btn():
+            sel = [rows[i] for i in tree.selection() if not rows[i].installed]
+            btn_install.set_enabled(bool(sel))
+
+        def install_selected():
+            sel = [rows[i].path for i in tree.selection() if not rows[i].installed]
+            if sel and self.install_paths(g, sel, parent=win):
+                load()
+
+        def browse():
+            paths = filedialog.askopenfilenames(parent=win, title=f"Install mods for {g.title}",
+                                                filetypes=[("SCS mods", "*.scs *.zip"), ("All files", "*.*")])
+            if paths and self.install_paths(g, paths, parent=win):
+                load()
+
+        T.Button(foot, "Browse for files…", browse, kind="ghost", icon=T.I_FOLDER).pack(side="left")
+        T.Button(foot, "Close", win.destroy, kind="secondary").pack(side="right")
+        btn_install = T.Button(foot, "Install selected", install_selected, kind="primary", icon=T.I_ADD)
+        btn_install.pack(side="right", padx=8)
+        tree.bind("<<TreeviewSelect>>", lambda e: refresh_btn())
+        tree.bind("<Double-1>", lambda e: install_selected())
+        win.bind("<Escape>", lambda e: win.destroy())
+        load()
+
+        win.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - 820) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - 640) // 3
+        win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        win.deiconify()
+        T.dark_titlebar(win)
 
     def open_mod_folder(self):
         d = mods.mod_dir(core.GAMES[self.mod_game.get()])

@@ -139,6 +139,47 @@ def enable_dpi_awareness() -> None:
         pass
 
 
+def enable_file_drop(win: tk.Misc, callback) -> None:
+    """Accept files dragged from Explorer onto the window; callback(list[str]) runs on the Tk thread.
+    Tk has no native file drop, so this subclasses the window and handles WM_DROPFILES."""
+    from ctypes import wintypes
+    try:
+        win.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
+        shell32, comctl32 = ctypes.windll.shell32, ctypes.windll.comctl32
+        LRESULT = ctypes.c_ssize_t
+        proc_t = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                                    ctypes.c_size_t, ctypes.c_size_t)
+        comctl32.DefSubclassProc.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        comctl32.DefSubclassProc.restype = LRESULT
+        comctl32.SetWindowSubclass.argtypes = [wintypes.HWND, proc_t, ctypes.c_size_t, ctypes.c_size_t]
+        shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
+        shell32.DragQueryFileW.restype = wintypes.UINT
+        shell32.DragFinish.argtypes = [wintypes.HANDLE]
+        shell32.DragAcceptFiles.argtypes = [wintypes.HWND, wintypes.BOOL]
+        WM_DROPFILES = 0x0233
+
+        def proc(h, msg, wp, lp, _id, _ref):
+            if msg == WM_DROPFILES:
+                paths = []
+                for i in range(shell32.DragQueryFileW(wp, 0xFFFFFFFF, None, 0)):
+                    n = shell32.DragQueryFileW(wp, i, None, 0) + 1
+                    buf = ctypes.create_unicode_buffer(n)
+                    shell32.DragQueryFileW(wp, i, buf, n)
+                    paths.append(buf.value)
+                shell32.DragFinish(wp)
+                win.after(0, callback, paths)  # don't run Tk code inside the window procedure
+                return 0
+            return comctl32.DefSubclassProc(h, msg, wp, lp)
+
+        cb = proc_t(proc)
+        win._tcm_drop_proc = cb  # keep the C callback alive
+        comctl32.SetWindowSubclass(hwnd, cb, 0x7C4D, 0)
+        shell32.DragAcceptFiles(hwnd, True)
+    except Exception:
+        pass  # drag and drop is a convenience; the file picker still works
+
+
 # ---------- logo (steering wheel on an amber tile, supersampled so it stays smooth) ----------
 
 def _rgb(c):
@@ -203,7 +244,7 @@ class Button(tk.Frame):
         if self._bg == hover:  # ghost button sitting on a raised card
             self._hover = HOVER
         super().__init__(master, bg=self._bg, cursor="hand2")
-        self.command, self.enabled = command, True
+        self.command, self.enabled, self._kind = command, True, kind
         self.parts = []
         if icon:
             self.parts.append(tk.Label(self, text=icon, font=ICON_FONT, bg=self._bg, fg=fg))
@@ -217,7 +258,7 @@ class Button(tk.Frame):
 
     def _paint(self, bg):
         if not self.enabled:
-            bg = self._bg
+            bg = RAISED if self._kind == "primary" else self._bg
         for w in (self, *self.parts):
             w.configure(bg=bg)
 

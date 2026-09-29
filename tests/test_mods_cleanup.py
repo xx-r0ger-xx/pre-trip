@@ -76,5 +76,57 @@ class CleanupTests(unittest.TestCase):
             self.assertFalse(cleanup.is_clutter(n), n)
 
 
+class InstallTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.mod_dir, self.dl = root / "mod", root / "Downloads"
+        self.dl.mkdir()
+        self._saved = (mods.mod_dir, mods.disabled_dir, core.is_running)
+        mods.mod_dir = lambda g: self.mod_dir
+        mods.disabled_dir = lambda g: root / "mod_disabled"
+        core.is_running = lambda g: False
+        self.game = core.GAMES["ats"]
+
+    def tearDown(self):
+        mods.mod_dir, mods.disabled_dir, core.is_running = self._saved
+        self.tmp.cleanup()
+
+    def _zip(self, name, files):
+        p = self.dl / name
+        with zipfile.ZipFile(p, "w") as z:
+            for n, data in files.items():
+                z.writestr(n, data)
+        return p
+
+    def test_inspect_and_install(self):
+        plain = self._zip("rain_ats.scs", {"manifest.sii": MANIFEST})
+        bundle = self._zip("big_download.zip", {"readme.txt": "hi", "folder/cool_mod.scs": "x", "other.scs": "y"})
+        junk = self._zip("photos.zip", {"a.jpg": "x"})
+        self.assertEqual(mods.inspect_archive(plain), ("mod", ["rain_ats.scs"]))
+        self.assertEqual(mods.inspect_archive(bundle)[0], "bundle")
+        self.assertEqual(mods.inspect_archive(junk), ("unknown", []))
+
+        found = mods.find_downloads(self.game, self.dl)
+        self.assertEqual({d.path.name for d in found}, {"rain_ats.scs", "big_download.zip"})
+        self.assertEqual(next(d for d in found if d.path == plain).game_hint, "ats")
+
+        self.assertEqual([p.name for p in mods.install(self.game, plain)], ["rain_ats.scs"])
+        self.assertEqual(sorted(p.name for p in mods.install(self.game, bundle)), ["cool_mod.scs", "other.scs"])
+        self.assertTrue(all(d.installed for d in mods.find_downloads(self.game, self.dl)))
+        with self.assertRaises(FileExistsError):
+            mods.install(self.game, plain)
+        with self.assertRaises(ValueError):
+            mods.install(self.game, junk)
+
+    def test_workshop_ids(self):
+        p = mods.parse_workshop_id
+        self.assertEqual(p("https://steamcommunity.com/sharedfiles/filedetails/?id=2440659232&searchtext="),
+                         "2440659232")
+        self.assertEqual(p("steam://url/CommunityFilePage/3013687427"), "3013687427")
+        self.assertEqual(p("  1213282672 "), "1213282672")
+        self.assertIsNone(p("https://example.com/mod.scs"))
+
+
 if __name__ == "__main__":
     unittest.main()
