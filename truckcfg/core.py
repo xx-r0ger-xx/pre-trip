@@ -112,6 +112,38 @@ def is_mapped(kind: str, value: str | None) -> bool:
     return kind == "constant" or bool(REAL_INPUT_RE.search(value))
 
 
+_DEVICE_RE = re.compile(r"\b([a-z]+)(\d*)\.(\w+)")
+_PRESS_RE = re.compile(r"\b(short|long)_press\(([^()]*)\)")
+
+
+def _pretty_token(m: re.Match) -> str:
+    dev, num, name = m[1], m[2], m[3]
+    device = {"keyboard": "Key", "joy": "Joy", "mouse": "Mouse"}.get(dev, dev.capitalize()) + num
+    if b := re.fullmatch(r"b(\d+)", name):
+        name = f"Btn {b[1]}"
+    elif p := re.fullmatch(r"pov(\d*)_(\w+)", name):
+        name = f"POV {p[2].capitalize()}"
+    elif k := re.fullmatch(r"key(\d)", name):
+        name = k[1]
+    else:
+        name = name.upper()
+    return f"{device} {name}"
+
+
+def pretty_input(kind: str, value: str | None) -> str | None:
+    """Human-readable binding, e.g. '`keyboard.h?0 | joy.b9?0 | semantical.horn?0`' -> 'Key H  ·  Joy Btn 9'."""
+    if value is None or kind == "constant":
+        return value
+    parts = []
+    for part in re.split(r"\s*\|\|?\s*", value.strip().strip("`")):
+        part = re.sub(r"\?\d+", "", part).strip()
+        if not part or part.startswith(("semantical.", "unbound")):
+            continue
+        part = _PRESS_RE.sub(lambda m: f"{m[2]} ({'tap' if m[1] == 'short' else 'hold'})", part)
+        parts.append(_DEVICE_RE.sub(_pretty_token, part))
+    return "  ·  ".join(parts) or "Unbound"
+
+
 @dataclass(frozen=True)
 class DiffRow:
     kind: str

@@ -1,6 +1,6 @@
 # Truck Config Manager
 
-Small Windows desktop app (Python + tkinter, no dependencies) for Euro Truck Simulator 2 and
+Windows desktop utility (Python + tkinter, no dependencies, dark dashboard UI) for Euro Truck Simulator 2 and
 American Truck Simulator controller bindings.
 
 - **Snapshots** – saves `controls.sii` and `gearbox_layout_*.sii` from a game profile to
@@ -9,6 +9,14 @@ American Truck Simulator controller bindings.
 - **Compare games** – shows every binding/constant that differs between ETS2 and ATS, and copies
   selected (or all shared) bindings from one game to the other. It edits lines in place, so actions
   that exist in only one game (e.g. ATS window shades) are left alone.
+- **Mods** – lists local (`<Documents>\<Game>\mod`) and Steam Workshop mods with name, author,
+  version, size and whether they declare support for the installed game version. Local mods can be
+  installed, disabled (parked in `mod_disabled`, so the game ignores them) or sent to the Recycle Bin.
+  Workshop titles come from Steam's public API and are cached in `TruckSim-Configs\workshop_cache.json`.
+  Activation and load order still happen in the game's own Mod Manager.
+- **Cleanup** – finds cloud-sync leftovers (`(# Name clash …)`, ` - Copy`, `-DESKTOP-…`) in the game
+  folders and moves them to `TruckSim-Configs\quarantine\<timestamp>` with a manifest. Nothing is
+  deleted. Also flags profiles missing `profile.sii` / `config_local.cfg` / saves.
 - **Drift warning** – on launch, warns if a game's controls changed since its latest snapshot.
   The first launch takes a `baseline` snapshot automatically.
 
@@ -21,7 +29,7 @@ and it takes an automatic snapshot first, so every change can be undone.
 pythonw app.pyw
 ```
 
-Tests: `python -m unittest -v tests.test_core`
+Tests: `python -m unittest -v tests.test_core tests.test_mods_cleanup`
 
 ## Notes
 
