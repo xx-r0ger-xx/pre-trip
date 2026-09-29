@@ -38,6 +38,17 @@ class Mod:
     modified: float = 0.0
     workshop_id: str | None = None
     universal: bool = False  # has a package with no version restriction (SCS fallback package)
+    display: str = ""  # manifest display_name - what the game writes into active_mods
+    pkg_id: str = ""  # set for "missing" rows: active in the profile but not installed
+
+    @property
+    def package(self) -> str:
+        """The id the game uses for this mod in profile.sii's active_mods list."""
+        if self.pkg_id:
+            return self.pkg_id
+        if self.workshop_id:
+            return f"mod_workshop_package.{int(self.workshop_id):016X}"
+        return self.path.name if self.path.is_dir() else self.path.stem
 
     def compat(self, game_version: str | None) -> str:
         """'ok', 'outdated' or 'unknown' against the installed game version."""
@@ -135,7 +146,7 @@ def _apply_manifest(mod: Mod, read) -> None:
     if not text:
         return
     m = parse_sii_strings(text)
-    mod.name = _first(m, "display_name") or mod.name
+    mod.name = mod.display = _first(m, "display_name") or mod.name
     mod.version = _first(m, "package_version")
     mod.author = _first(m, "author")
     mod.categories = m.get("category", [])

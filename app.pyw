@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
 
-from truckcfg import cleanup, core, mods, theme as T
+from truckcfg import cleanup, core, loadorder, mods, steamugc, theme as T
 
 MISSING = "—  not in this game"
 
@@ -98,6 +98,9 @@ class App(tk.Tk):
         self.mod_list, self._mods_gen, self._mods_results, self.mods_loaded = [], 0, {}, False
         self.mod_query = tk.StringVar()
         self.mod_query.trace_add("write", lambda *a: self.render_mods())
+        self.mod_active_only = tk.BooleanVar(value=False)
+        self.mod_sort = ("order", False)  # (column, descending)
+        self.mod_order, self.mod_order_saved, self.mod_sii, self.order_err = [], [], None, None
         self.clutter = []
 
         # status bar
@@ -473,16 +476,22 @@ class App(tk.Tk):
         os.startfile(core.STORE)
 
     # ----- mods page -----
+    MOD_COLS = (("order", "#", 40, False, "e"), ("name", "MOD", 200, True, "w"), ("source", "SOURCE", 80, False, "w"),
+                ("version", "VERSION", 70, False, "w"), ("compat", "GAME VERSION", 112, False, "w"),
+                ("size", "SIZE", 74, False, "e"), ("status", "IN GAME", 88, False, "w"))
+
     def _build_mods(self, parent):
         f = tk.Frame(parent, bg=T.BG, padx=32, pady=26)
-        self.page_header(f, "Mods", "Local and Steam Workshop mods for each game. Turning mods on and setting "
-                                    "load order still happens in the game's own Mod Manager.")
+        self.page_header(f, "Mods", "Local and Steam Workshop mods for each game. Turn mods on and set their load "
+                                    "order here - # 1 is the top of the in-game Mod Manager and wins conflicts.")
         bar = tk.Frame(f, bg=T.BG)
         bar.pack(fill="x", pady=(20, 12))
         self.mod_game = tk.StringVar(value="ats")
         T.Segmented(bar, [(k, k.upper(), T.GAME_COLOR[k]) for k in core.GAMES], self.mod_game,
                     command=self.refresh_mods).pack(side="left")
-        T.SearchBox(bar, self.mod_query, placeholder="Filter mods", width=24).pack(side="left", padx=10)
+        T.SearchBox(bar, self.mod_query, placeholder="Search mods, authors, categories", width=30).pack(
+            side="left", padx=10)
+        T.Chip(bar, "Active only", self.mod_active_only, command=self.render_mods).pack(side="left")
         T.Button(bar, "Open mod folder", self.open_mod_folder, kind="ghost", icon=T.I_FOLDER).pack(side="right")
         T.Button(bar, "Rescan", self.refresh_mods, kind="ghost", icon=T.I_REFRESH).pack(side="right", padx=4)
         T.Button(bar, "Install mod…", self.install_mod, kind="primary", icon=T.I_ADD).pack(side="right", padx=4)
@@ -490,30 +499,40 @@ class App(tk.Tk):
         self.mods_counts = tk.Label(f, bg=T.BG, fg=T.MUTED, font=T.SMALL, anchor="w")
         self.mods_counts.pack(fill="x", pady=(0, 10))
 
-        body = tk.Frame(f, bg=T.BG)
-        body.pack(fill="both", expand=True)
-        self.mod_detail = bordered(body)
+        # unsaved load-order bar (shown only while there are staged changes)
+        self.order_bar = tk.Frame(f, bg=T.ACCENT_DIM)
+        tk.Frame(self.order_bar, bg=T.ACCENT, width=4).pack(side="left", fill="y")
+        self.order_bar_text = tk.Label(self.order_bar, bg=T.ACCENT_DIM, fg=T.TEXT, font=T.UI, anchor="w")
+        self.order_bar_text.pack(side="left", padx=14, pady=10)
+        T.Button(self.order_bar, "Save to game", self.save_order, kind="primary", icon=T.I_CHECK).pack(
+            side="right", padx=(4, 10))
+        T.Button(self.order_bar, "Discard", self.discard_order, kind="ghost").pack(side="right")
+
+        self.mods_body = tk.Frame(f, bg=T.BG)
+        self.mods_body.pack(fill="both", expand=True)
+        self.mod_detail = bordered(self.mods_body)
         self.mod_detail.configure(width=340)
         self.mod_detail.pack(side="right", fill="y", padx=(14, 0))
         self.mod_detail.pack_propagate(False)
 
-        tf = bordered(body)
+        tf = bordered(self.mods_body)
         tf.pack(side="left", fill="both", expand=True)
-        cols = (("name", "MOD", 220, True, "w"), ("source", "SOURCE", 84, False, "w"),
-                ("version", "VERSION", 76, False, "w"), ("compat", "GAME VERSION", 122, False, "w"),
-                ("size", "SIZE", 78, False, "e"), ("status", "STATUS", 84, False, "w"))
-        self.mod_tree = ttk.Treeview(tf, columns=[c[0] for c in cols], show="headings", selectmode="browse")
-        for c, t, w, stretch, anchor in cols:
-            self.mod_tree.heading(c, text=t, anchor=anchor)
-            self.mod_tree.column(c, width=w, minwidth=w if not stretch else 160, stretch=stretch, anchor=anchor)
+        self.mod_tree = ttk.Treeview(tf, columns=[c[0] for c in self.MOD_COLS], show="headings", selectmode="browse")
+        for c, t, w, stretch, anchor in self.MOD_COLS:
+            self.mod_tree.heading(c, text=t, anchor=anchor, command=lambda c=c: self.sort_mods(c))
+            self.mod_tree.column(c, width=w, minwidth=w if not stretch else 140, stretch=stretch, anchor=anchor)
         self.mod_tree.tag_configure("odd", background=T.STRIPE)
+        self.mod_tree.tag_configure("inactive", foreground=T.MUTED)
         self.mod_tree.tag_configure("disabled", foreground=T.FAINT)
         self.mod_tree.tag_configure("outdated", foreground=T.ACCENT)
+        self.mod_tree.tag_configure("missing", foreground=T.DANGER)
         sb = ttk.Scrollbar(tf, orient="vertical", command=self.mod_tree.yview)
         self.mod_tree.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.mod_tree.pack(fill="both", expand=True)
         self.mod_tree.bind("<<TreeviewSelect>>", lambda e: self.show_mod_detail())
+        self.mod_tree.bind("<Alt-Up>", lambda e: (self.move_mod(-1), "break")[1])
+        self.mod_tree.bind("<Alt-Down>", lambda e: (self.move_mod(1), "break")[1])
         self.mod_empty = tk.Label(tf, bg=T.SURFACE, fg=T.MUTED, font=T.UI)
         self.mod_rows = {}
         self.show_mod_detail()
@@ -521,9 +540,14 @@ class App(tk.Tk):
 
     def refresh_mods(self):
         """Scan in the background: Workshop folders can be large and titles come from the Steam API."""
+        if self.order_dirty() and not T.confirm(self, "Discard load order changes?",
+                                                "You have unsaved load order changes. Rescanning throws them away.",
+                                                ok="Discard", tone=T.DANGER):
+            return
         self.mods_loaded = True
         self._mods_gen += 1
         gen, g = self._mods_gen, core.GAMES[self.mod_game.get()]
+        profile = self.profile(g.key)
         self.mod_tree.delete(*self.mod_tree.get_children())
         self.mod_empty.configure(text="Scanning mods…")
         self.mod_empty.place(relx=0.5, rely=0.5, anchor="center")
@@ -537,9 +561,18 @@ class App(tk.Tk):
                 except Exception:  # offline: fall back to whatever titles were cached before
                     cache = mods.load_workshop_cache()
                 mods.apply_workshop_titles(found, cache)
-                self._mods_results[gen] = (found, mods.game_version(g), None)
+                sii, order, order_err = None, [], None
+                try:
+                    sii = loadorder.find_profile_sii(profile) if profile else None
+                    if sii:
+                        order = loadorder.read_order(sii)[1]
+                    else:
+                        order_err = "No profile.sii found - launch the game once with this profile."
+                except Exception as e:
+                    order_err = str(e)
+                self._mods_results[gen] = (found, mods.game_version(g), None, sii, order, order_err)
             except Exception as e:
-                self._mods_results[gen] = ([], None, e)
+                self._mods_results[gen] = ([], None, e, None, [], None)
         threading.Thread(target=work, daemon=True).start()
         self._await_mods(gen)
 
@@ -550,30 +583,79 @@ class App(tk.Tk):
         if res is None:
             self.after(120, self._await_mods, gen)
             return
-        self.mod_list, self.game_ver, err = res
+        self.mod_list, self.game_ver, err, self.mod_sii, order, self.order_err = res
+        self.mod_order, self.mod_order_saved = list(order), list(order)
+        self._add_missing_rows()
         self.render_mods()
         if err:
             T.error(self, "Couldn't read mods", str(err))
+
+    def _add_missing_rows(self):
+        """Mods the profile still lists as active but that aren't installed (e.g. unsubscribed)."""
+        known = {m.package for m in self.mod_list}
+        g = core.GAMES[self.mod_game.get()]
+        for e in self.mod_order:
+            if e.package not in known:
+                self.mod_list.append(mods.Mod(g, "missing", Path(e.package), name=e.display, display=e.display,
+                                              pkg_id=e.package))
+                known.add(e.package)
+
+    # load order helpers
+    def order_pos(self, m):
+        return next((i for i, e in enumerate(self.mod_order) if e.package == m.package), None)
+
+    def order_dirty(self):
+        return self.mod_order != self.mod_order_saved
+
+    def mod_status(self, m):
+        if m.source == "missing":
+            return "Missing"
+        if not m.enabled:
+            return "Parked"
+        return "Active" if self.order_pos(m) is not None else "Off"
+
+    def sort_mods(self, col):
+        cur, desc = self.mod_sort
+        self.mod_sort = (col, not desc if col == cur else col == "size")
+        self.render_mods(keep=getattr(self.current_mod(), "path", None))
+
+    def _sort_key(self, col):
+        order_n = len(self.mod_order)
+        return {
+            "order": lambda m: (p if (p := self.order_pos(m)) is not None else order_n, m.name.lower()),
+            "name": lambda m: m.name.lower(),
+            "source": lambda m: (m.source, m.name.lower()),
+            "version": lambda m: (m.version or "~", m.name.lower()),
+            "compat": lambda m: ({"outdated": 0, "unknown": 1, "ok": 2}[m.compat(self.game_ver)], m.name.lower()),
+            "size": lambda m: m.size,
+            "status": lambda m: ({"Missing": 0, "Active": 1, "Off": 2, "Parked": 3}[self.mod_status(m)], m.name.lower()),
+        }[col]
 
     def render_mods(self, keep=None):
         if not hasattr(self, "game_ver"):
             return
         self.mod_tree.delete(*self.mod_tree.get_children())
         self.mod_rows = {}
+        col, desc = self.mod_sort
+        for c, t, *_ in self.MOD_COLS:
+            self.mod_tree.heading(c, text=t + ("  ▼" if desc else "  ▲") * (c == col))
         q = self.mod_query.get().strip().lower()
-        for m in self.mod_list:
+        for m in sorted(self.mod_list, key=self._sort_key(col), reverse=desc):
             if q and not any(q in s.lower() for s in (m.name, m.author, m.path.name, " ".join(m.categories))):
+                continue
+            pos, status = self.order_pos(m), self.mod_status(m)
+            if self.mod_active_only.get() and pos is None:
                 continue
             c = m.compat(self.game_ver)
             tags = ["odd"] if len(self.mod_rows) % 2 else []
-            if not m.enabled:
-                tags.append("disabled")
-            elif c == "outdated":
+            tags.append({"Missing": "missing", "Parked": "disabled", "Off": "inactive"}.get(status, ""))
+            if status == "Active" and c == "outdated":
                 tags.append("outdated")
             iid = self.mod_tree.insert("", "end", tags=tags, values=(
-                m.name, "Workshop" if m.source == "workshop" else "Local", m.version or "—",
+                "" if pos is None else pos + 1, m.name,
+                {"workshop": "Workshop", "local": "Local", "missing": "—"}[m.source], m.version or "—",
                 {"ok": "✓  Compatible", "outdated": "⚠  Outdated", "unknown": "—"}[c],
-                mods.fmt_size(m.size), "Subscribed" if m.source == "workshop" else "Enabled" if m.enabled else "Disabled"))
+                "—" if m.source == "missing" else mods.fmt_size(m.size), status))
             self.mod_rows[iid] = m
             if keep is not None and m.path == keep:
                 self.mod_tree.selection_set(iid)
@@ -581,20 +663,38 @@ class App(tk.Tk):
         if self.mod_rows:
             self.mod_empty.place_forget()
         else:
-            self.mod_empty.configure(text="No mods match that filter." if q else
+            self.mod_empty.configure(text="No mods match that filter." if q or self.mod_active_only.get() else
                                      "No mods installed for this game yet.  Use Install mod… to add a .scs file.")
             self.mod_empty.place(relx=0.5, rely=0.5, anchor="center")
-        local = [m for m in self.mod_list if m.source == "local"]
-        outdated = sum(1 for m in self.mod_list if m.enabled and m.compat(self.game_ver) == "outdated")
+        installed = [m for m in self.mod_list if m.source != "missing"]
+        local = [m for m in installed if m.source == "local"]
+        outdated = sum(1 for m in installed if self.order_pos(m) is not None and m.compat(self.game_ver) == "outdated")
         ver = mods.short_version(self.game_ver)
         self.mods_counts.config(
-            text=f"Game version {ver}   ·   {len(local)} local ({sum(not m.enabled for m in local)} disabled)"
-                 f"   ·   {len(self.mod_list) - len(local)} Workshop   ·   "
-                 f"{mods.fmt_size(sum(m.size for m in self.mod_list))} on disk"
-                 + (f"   ·   {outdated} may not work with {ver}" if outdated else "")
+            text=f"Game version {ver}   ·   {len(self.mod_order)} active in game   ·   {len(local)} local "
+                 f"({sum(not m.enabled for m in local)} parked)   ·   {len(installed) - len(local)} Workshop   ·   "
+                 f"{mods.fmt_size(sum(m.size for m in installed))} on disk"
+                 + (f"   ·   {outdated} active may not work with {ver}" if outdated else "")
+                 + (f"   ·   Load order unavailable: {self.order_err}" if self.order_err else "")
                  + ("" if self.game_ver else "   ·   launch the game once so its version can be detected"))
+        self.render_order_bar()
         if keep is None:
             self.show_mod_detail()
+
+    def render_order_bar(self):
+        if self.order_dirty():
+            saved = {e.package for e in self.mod_order_saved}
+            now = {e.package for e in self.mod_order}
+            parts = [f"{len(now - saved)} turned on" if now - saved else "",
+                     f"{len(saved - now)} turned off" if saved - now else "",
+                     "order changed" if [e for e in self.mod_order if e.package in saved] !=
+                                        [e for e in self.mod_order_saved if e.package in now] else ""]
+            self.order_bar_text.config(text="Unsaved load order:  " + ",  ".join(p for p in parts if p)
+                                            + ".   Close the game before saving.")
+            if not self.order_bar.winfo_ismapped():
+                self.order_bar.pack(fill="x", pady=(0, 10), before=self.mods_body)
+        else:
+            self.order_bar.pack_forget()
 
     def current_mod(self):
         sel = self.mod_tree.selection()
@@ -608,6 +708,8 @@ class App(tk.Tk):
         if not m:
             tk.Label(d, text=T.I_PUZZLE, font=(T.ICON_FONT[0], 34), bg=T.SURFACE, fg=T.FAINT).pack(pady=(90, 12))
             tk.Label(d, text="Select a mod to see its details.", bg=T.SURFACE, fg=T.MUTED, font=T.UI).pack()
+            tk.Label(d, text="Click a column header to sort.\nAlt + ↑ / ↓ moves the selected mod.", bg=T.SURFACE,
+                     fg=T.FAINT, font=T.SMALL, justify="center").pack(pady=(10, 0))
             return
         inner = tk.Frame(d, bg=T.SURFACE, padx=20, pady=20)
         inner.pack(fill="both", expand=True)
@@ -615,10 +717,11 @@ class App(tk.Tk):
                  anchor="w").pack(fill="x")
         badges = tk.Frame(inner, bg=T.SURFACE)
         badges.pack(fill="x", pady=(8, 14))
-        c = m.compat(self.game_ver)
-        for text, bg, fg in (("WORKSHOP" if m.source == "workshop" else "LOCAL", T.RAISED, T.MUTED),
-                             ("SUBSCRIBED" if m.source == "workshop" else "ENABLED" if m.enabled else "DISABLED", T.RAISED,
-                              T.TEXT if m.enabled else T.FAINT),
+        c, pos, status = m.compat(self.game_ver), self.order_pos(m), self.mod_status(m)
+        for text, bg, fg in (({"workshop": "WORKSHOP", "local": "LOCAL", "missing": "NOT INSTALLED"}[m.source],
+                              T.RAISED, T.DANGER if m.source == "missing" else T.MUTED),
+                             (f"ACTIVE  #{pos + 1}" if pos is not None else status.upper(), T.RAISED,
+                              T.TEXT if pos is not None else T.FAINT),
                              *([("OUTDATED", T.ACCENT_DIM, T.ACCENT)] if c == "outdated" else [])):
             tk.Label(badges, text=text, font=T.BADGE, bg=bg, fg=fg, padx=7, pady=2).pack(side="left", padx=(0, 6))
 
@@ -629,8 +732,11 @@ class App(tk.Tk):
                  ("Categories", ", ".join(m.categories) or "—"),
                  ("Works with", "any version" if m.universal else (works or "not declared")),
                  ("Size", mods.fmt_size(m.size)),
-                 ("Updated", datetime.fromtimestamp(m.modified).strftime("%b %d, %Y")),
+                 ("Updated", datetime.fromtimestamp(m.modified).strftime("%b %d, %Y") if m.modified else "—"),
                  ("File", m.path.name))
+        if m.source == "missing":
+            facts = (("Package", m.package), ("Why", "Still listed as active in your profile, but the mod isn't "
+                                                     "installed any more. Turn it off to tidy the list."))
         for i, (k, v) in enumerate(facts):
             tk.Label(grid, text=k, bg=T.SURFACE, fg=T.FAINT, font=T.SMALL, anchor="nw").grid(
                 row=i, column=0, sticky="nw", pady=2)
@@ -639,17 +745,40 @@ class App(tk.Tk):
 
         actions = tk.Frame(inner, bg=T.SURFACE)
         actions.pack(side="bottom", fill="x", pady=(14, 0))
-        if m.source == "local":
-            T.Button(actions, "Disable" if m.enabled else "Enable", lambda: self.toggle_mod(m),
-                     kind="secondary" if m.enabled else "primary").pack(fill="x", pady=(0, 6))
-        else:
-            T.Button(actions, "Open Workshop page", lambda: os.startfile(
-                f"steam://url/CommunityFilePage/{m.workshop_id}"), icon=T.I_GLOBE).pack(fill="x", pady=(0, 6))
-        T.Button(actions, "Show in Explorer", lambda: os.startfile(m.path.parent if m.path.is_file() else m.path),
-                 kind="ghost", icon=T.I_FOLDER).pack(fill="x")
-        if m.source == "local":
-            T.Button(actions, "Move to Recycle Bin", lambda: self.remove_mod(m), kind="ghost",
-                     icon=T.I_DELETE).pack(fill="x", pady=(6, 0))
+        can_order = self.mod_sii is not None and not self.order_err
+        if status == "Parked":
+            T.Button(actions, "Unpark file", lambda: self.toggle_mod(m), kind="primary").pack(fill="x", pady=(0, 6))
+            tk.Label(actions, text="Parked files sit in mod_disabled, where the game can't see them.",
+                     bg=T.SURFACE, fg=T.FAINT, font=T.SMALL, wraplength=290, justify="left").pack(fill="x", pady=(0, 6))
+        elif can_order and pos is None:
+            T.Button(actions, "Turn on in game", lambda: self.set_active(m, True), kind="primary",
+                     icon=T.I_CHECK).pack(fill="x", pady=(0, 6))
+        elif can_order:
+            moves = tk.Frame(actions, bg=T.SURFACE)
+            moves.pack(fill="x", pady=(0, 6))
+            for text, fn in (("Top", lambda: self.move_mod(-10**6)), ("Up", lambda: self.move_mod(-1)),
+                             ("Down", lambda: self.move_mod(1)), ("Bottom", lambda: self.move_mod(10**6))):
+                T.Button(moves, text, fn, kind="secondary", padx=6, pady=5).pack(side="left", fill="x", expand=True,
+                                                                                 padx=(0, 4))
+            T.Button(actions, "Turn off in game", lambda: self.set_active(m, False), kind="secondary").pack(
+                fill="x", pady=(0, 6))
+        small = tk.Frame(actions, bg=T.SURFACE)
+        small.pack(fill="x")
+        links = []
+        if m.source == "workshop":
+            links.append(("Workshop", lambda: os.startfile(f"steam://url/CommunityFilePage/{m.workshop_id}"),
+                          T.I_GLOBE))
+        if m.source != "missing":
+            links.append(("Explorer", lambda: os.startfile(m.path.parent if m.path.is_file() else m.path),
+                          T.I_FOLDER))
+        if m.source == "local" and m.enabled:
+            links.append(("Park file", lambda: self.toggle_mod(m), None))
+        for text, fn, icon in links:
+            T.Button(small, text, fn, kind="ghost", icon=icon, padx=6, pady=5).pack(side="left", fill="x",
+                                                                                   expand=True)
+        if m.source in ("local", "workshop"):
+            T.Button(actions, "Unsubscribe" if m.source == "workshop" else "Move to Recycle Bin",
+                     lambda: self.remove_mod(m), kind="ghost", icon=T.I_DELETE, pady=5).pack(fill="x", pady=(4, 0))
 
         if m.description:
             tk.Label(inner, text="DESCRIPTION", font=T.CAPS, bg=T.SURFACE, fg=T.FAINT).pack(anchor="w", pady=(16, 6))
@@ -659,27 +788,85 @@ class App(tk.Tk):
             txt.configure(state="disabled")
             txt.pack(fill="both", expand=True)
 
+    def _refresh_after_order_change(self, m):
+        self.render_mods(keep=m.path)
+        self.show_mod_detail()
+
+    def set_active(self, m, on):
+        if on:
+            self.mod_order.insert(0, loadorder.Entry(m.package, m.display or m.name))
+            self.say(f"{m.name} turned on at the top of the load order.  Save to apply it in the game.")
+        else:
+            self.mod_order = [e for e in self.mod_order if e.package != m.package]
+            if m.source == "missing":
+                self.mod_list.remove(m)
+            self.say(f"{m.name} turned off.  Save to apply it in the game.")
+        self._refresh_after_order_change(m)
+
+    def move_mod(self, delta):
+        m = self.current_mod()
+        pos = self.order_pos(m) if m else None
+        if pos is None:
+            return
+        new = max(0, min(len(self.mod_order) - 1, pos + delta))
+        if new != pos:
+            self.mod_order.insert(new, self.mod_order.pop(pos))
+            self.mod_sort = ("order", False)  # show the move where it happened
+            self._refresh_after_order_change(m)
+
+    def save_order(self):
+        g = core.GAMES[self.mod_game.get()]
+
+        def run():
+            dest = loadorder.write_order(self.mod_sii, g, self.mod_order)
+            self.mod_order_saved = list(self.mod_order)
+            self.render_mods(keep=getattr(self.current_mod(), "path", None))
+            self.say(f"Load order saved to {g.title}.  The previous profile.sii is backed up in {dest}.")
+        self.guard(run)
+
+    def discard_order(self):
+        self.mod_order = list(self.mod_order_saved)
+        self.mod_list = [m for m in self.mod_list if m.source != "missing"]
+        self._add_missing_rows()
+        self.render_mods()
+        self.say("Load order changes discarded.")
+
     def toggle_mod(self, m):
         def run():
             dest = mods.set_enabled(m, not m.enabled)
             m.path, m.enabled = dest, not m.enabled
+            if not m.enabled:  # a parked file can't load, so take it out of the game's list too
+                self.mod_order = [e for e in self.mod_order if e.package != m.package]
             self.render_mods(keep=dest)
             self.show_mod_detail()
-            self.say(f"{'Enabled' if m.enabled else 'Disabled'} {m.name}."
-                     + ("" if m.enabled else f"  Parked in {mods.disabled_dir(m.game)} so the game ignores it."))
+            self.say(f"{'Unparked' if m.enabled else 'Parked'} {m.name}."
+                     + ("" if m.enabled else f"  Moved to {mods.disabled_dir(m.game)} so the game ignores it."))
         self.guard(run)
 
     def remove_mod(self, m):
-        if not T.confirm(self, "Remove mod?", f"{m.name} will be moved to the Recycle Bin. "
-                         "You can restore it from there if you change your mind.", ok="Move to Recycle Bin",
-                         tone=T.DANGER, detail=str(m.path)):
+        workshop = m.source == "workshop"
+        if not T.confirm(self, "Unsubscribe?" if workshop else "Remove mod?",
+                         f"You'll be unsubscribed from {m.name} and Steam will delete its files. Steam may show the "
+                         "game as running for a few seconds while this happens." if workshop else
+                         f"{m.name} will be moved to the Recycle Bin. "
+                         "You can restore it from there if you change your mind.",
+                         ok="Unsubscribe" if workshop else "Move to Recycle Bin", tone=T.DANGER,
+                         detail=f"Workshop item {m.workshop_id}" if workshop else str(m.path)):
             return
+        self.say(f"Unsubscribing from {m.name}…" if workshop else "")
+        self.update_idletasks()
 
         def run():
-            mods.remove(m)
+            if workshop:
+                steamugc.unsubscribe(m.game, [m.workshop_id])
+            else:
+                mods.remove(m)
             self.mod_list.remove(m)
+            was_active = self.order_pos(m) is not None
+            self.mod_order = [e for e in self.mod_order if e.package != m.package]
             self.render_mods()
-            self.say(f"Moved {m.path.name} to the Recycle Bin.")
+            self.say(("Unsubscribed from " if workshop else "Moved to the Recycle Bin: ") + m.name + "."
+                     + ("  It was active, so save the load order to drop it from the game's list." if was_active else ""))
         self.guard(run)
 
     def install_mod(self):
@@ -692,8 +879,7 @@ class App(tk.Tk):
         def run():
             done = [mods.install(g, Path(p)).name for p in paths]
             self.refresh_mods()
-            self.say(f"Installed {', '.join(done)} into {mods.mod_dir(g)}. "
-                     "Activate it in the game's Mod Manager.")
+            self.say(f"Installed {', '.join(done)} into {mods.mod_dir(g)}. Turn it on here or in the game.")
         self.guard(run)
 
     def open_mod_folder(self):
