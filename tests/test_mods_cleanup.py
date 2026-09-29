@@ -75,6 +75,10 @@ class CleanupTests(unittest.TestCase):
         for n in no:
             self.assertFalse(cleanup.is_clutter(n), n)
 
+    def test_quarantine_nothing(self):
+        with self.assertRaises(ValueError):
+            cleanup.quarantine([])
+
 
 class InstallTests(unittest.TestCase):
     def setUp(self):

@@ -63,6 +63,8 @@ def find_clutter(game: core.Game) -> list[Clutter]:
 
 def quarantine(items: list[Clutter]) -> Path:
     """Move items under STORE/quarantine/<timestamp>/<game>/<relative path>, with a manifest for undo."""
+    if not items:
+        raise ValueError("Nothing to quarantine.")
     for g in {c.game for c in items}:
         if core.is_running(g):
             raise RuntimeError(f"Close {g.title} first.")
