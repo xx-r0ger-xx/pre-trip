@@ -95,6 +95,100 @@ def replace_order(text: str, order: list[Entry]) -> str:
     return text[:block.start()] + nl.join(lines) + nl + text[block.end():]
 
 
+# ---------- recommended order ----------
+# Community consensus (Steam "Proper Load Order for Mods [1.57+]", SCS forum map-combo threads, ProMods): small
+# fixes and overrides on top, then things that modify other content, then the base content itself, maps last.
+
+@dataclass(frozen=True)
+class Group:
+    key: str
+    title: str
+    examples: str
+    categories: tuple[str, ...]  # manifest category[] values
+    words: tuple[str, ...]  # name keywords (regex fragments, matched on word boundaries)
+
+
+GROUPS = (
+    Group("fixes", "Patches & fixes", "Compatibility patches, bug fixes, anything whose author says 'top'",
+          (), (r"patch(es)?", r"compat\w*", r"hot ?fix", r"bug ?fix(es)?", r"fix for", r"add-?on for")),
+    Group("graphics", "Graphics & weather", "Weather, lighting, reflections, seasons, textures",
+          ("graphics", "weather"), (r"weather", r"rain", r"reflections?", r"autumn", r"winter", r"spring", r"summer",
+                                    r"seasons?", r"lighting", r"lights", r"sky", r"fog", r"graphics?", r"textures?", r"reshade")),
+    Group("sound", "Sound", "Engine and exhaust sounds, horns, ambient audio",
+          ("sound",), (r"sounds?", r"straight ?pipe", r"exhaust", r"horns?", r"jake ?brake", r"audio")),
+    Group("physics", "Physics & driving", "Truck physics, gearboxes, retarders, handling",
+          ("physics",), (r"physics", r"suspension", r"handling", r"gearbox", r"transmission", r"retarder", r"i-shift")),
+    Group("ui", "UI, GPS & other", "Route advisors, GPS, menus, and anything uncategorised",
+          ("ui",), (r"gps", r"route advis\w*", r"navigation", r"hud", r"ui", r"menu", r"loading screens?")),
+    Group("interior", "Truck parts & interiors", "Dashboards, interiors, lights, tuning parts",
+          ("interior", "tuning_parts"), (r"dashboards?", r"interiors?", r"cabin", r"mirrors?", r"tuning", r"parts",
+                                         r"lcd", r"accessor\w*", r"light ?bars?", r"beacons?", r"headlights?")),
+    Group("traffic", "AI traffic", "AI traffic packs, traffic density, AI behaviour",
+          ("ai_traffic",), (r"traffic", r"ai", r"drivers")),
+    Group("cargo", "Cargo, jobs & map objects", "Cargo packs, economy, companies, billboards",
+          ("cargo_pack", "cargo", "models", "prefabs"), (r"cargo", r"jobs?", r"economy", r"compan(y|ies)",
+                                                         r"gas stations?", r"billboards?", r"fuel", r"prices")),
+    Group("paint", "Paint jobs & skins", "Truck and trailer skins",
+          ("paint_job",), (r"paint ?jobs?", r"skins?", r"liver(y|ies)")),
+    Group("trailers", "Trailers", "Standalone trailers and trailer packs",
+          ("trailer",), (r"trailers?",)),
+    Group("trucks", "Trucks", "Standalone trucks",
+          ("truck",), (r"trucks?", r"peterbilt", r"kenworth", r"freightliner", r"mack", r"scania", r"volvo", r"daf",
+                       r"iveco", r"actros")),
+    Group("maps", "Maps (always last)", "Map mods and map combos - follow the combo's own order exactly",
+          ("map",), (r"maps?", r"promods", r"reforma", r"roextended", r"coast to coast", r"sierra nevada")),
+)
+DEFAULT_GROUP = next(g for g in GROUPS if g.key == "ui")
+_WORD_RE = {g.key: re.compile(r"\b(" + "|".join(g.words) + r")\b", re.I) for g in GROUPS}
+
+GUIDES = (
+    ("Proper Load Order for Mods [1.57+]", "Steam guide",
+     "https://steamcommunity.com/sharedfiles/filedetails/?id=3147291492"),
+    ("ETS2 Mod Load Order & Crash Fixing", "Steam guide, 2026",
+     "https://steamcommunity.com/sharedfiles/filedetails/?id=3751019029"),
+    ("ATS Map Combos - load order", "SCS forum, kept up to date per game version",
+     "https://forum.scssoft.com/viewtopic.php?t=292914"),
+    ("Correct load order", "ProMods forum (ETS2 map combos)", "https://promods.net/viewtopic.php?t=19865"),
+    ("Mod manager & manifest.sii", "SCS Modding Wiki",
+     "https://modding.scssoft.com/wiki/Documentation/Engine/Mod_manager"),
+)
+
+
+def classify(name: str, categories: list[str] | tuple = ()) -> tuple[Group, str]:
+    """(group, reason) from the manifest's categories and words in the name. When they disagree the higher group
+    wins: a mod that tweaks something (a dashboard tagged 'truck') belongs above the base content it modifies."""
+    name = name.replace("_", " ")
+    hits = []
+    for cat in categories:
+        if g := next((g for g in GROUPS if cat.lower() in g.categories), None):
+            hits.append((GROUPS.index(g), g, f"manifest category “{cat}”"))
+            break
+    if g_m := next(((g, m) for g in GROUPS if (m := _WORD_RE[g.key].search(name))), None):
+        hits.append((GROUPS.index(g_m[0]), g_m[0], f"name mentions “{g_m[1][0]}”"))
+    if not hits:
+        return DEFAULT_GROUP, "no category or keyword - treated as other"
+    _, g, why = min(hits, key=lambda h: h[0])
+    return g, why
+
+
+def recommended_order(order: list[Entry], categories_for) -> list[Entry]:
+    """Stable sort by group: keeps the user's relative order inside each group. categories_for(entry) -> list."""
+    rank = {g.key: i for i, g in enumerate(GROUPS)}
+    return [e for _, _, e in sorted(
+        (rank[classify(e.display or e.package, categories_for(e))[0].key], i, e) for i, e in enumerate(order))]
+
+
+PRIORITY_NOTE_RE = re.compile(
+    r"[^.!\n]*\b(priority|load order|mod manager|(place|put|load|keep|position)\w*\b[^.!\n]*\b(above|below|over|under"
+    r"|higher|lower|top|bottom))\b[^.!\n]*[.!]?", re.I)
+
+
+def author_notes(description: str) -> list[str]:
+    """Sentences in a mod description that give load-order instructions."""
+    notes = (m[0].strip() for m in PRIORITY_NOTE_RE.finditer(description))
+    return [n for n in notes if len(n) > 12][:4]
+
+
 def backup(path: Path, game: core.Game) -> Path:
     dest = BACKUPS / game.key / datetime.now().strftime("%Y-%m-%d_%H%M%S")
     dest.mkdir(parents=True, exist_ok=True)

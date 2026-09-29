@@ -87,5 +87,29 @@ class LoadOrderTests(unittest.TestCase):
         self.assertEqual(loadorder.workshop_package("830663438"), "mod_workshop_package.000000003182EB0E")
 
 
+class RecommendedOrderTests(unittest.TestCase):
+    def test_classify(self):
+        c = lambda n, cats=(): loadorder.classify(n, cats)[0].key
+        self.assertEqual(c("Weather_3.9_16k", ["other"]), "graphics")
+        self.assertEqual(c("Sound Fixes Pack v26.66 - ATS"), "sound")
+        self.assertEqual(c("Western Star 57X Improved Dashboard", ["truck"]), "interior")  # higher group wins
+        self.assertEqual(c("Bright Headlights", ["graphics", "interior"]), "graphics")
+        self.assertEqual(c("ProMods Canada Def Patch", ["map"]), "fixes")
+        self.assertEqual(c("Some Map", ["map"]), "maps")
+        self.assertEqual(c("Mystery Mod"), "ui")
+
+    def test_stable_group_sort(self):
+        E = loadorder.Entry
+        order = [E("m", "Big Map"), E("t2", "Traffic B"), E("w", "Winter Weather"), E("t1", "Traffic A")]
+        cats = {"m": ["map"], "t1": ["ai_traffic"], "t2": ["ai_traffic"], "w": []}
+        new = loadorder.recommended_order(order, lambda e: cats[e.package])
+        self.assertEqual([e.package for e in new], ["w", "t2", "t1", "m"])  # traffic keeps B before A
+
+    def test_author_notes(self):
+        self.assertEqual(loadorder.author_notes("Give this a HIGH priority in Mod Manager. Enjoy!"),
+                         ["Give this a HIGH priority in Mod Manager."])
+        self.assertEqual(loadorder.author_notes("Shows litres (at the bottom of the display)."), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 """Truck Config Manager - snapshot, restore and sync ETS2/ATS controller bindings."""
 import os
 import threading
+import webbrowser
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -496,8 +497,15 @@ class App(tk.Tk):
         T.Button(bar, "Rescan", self.refresh_mods, kind="ghost", icon=T.I_REFRESH).pack(side="right", padx=4)
         T.Button(bar, "Install mod…", self.install_mod, kind="primary", icon=T.I_ADD).pack(side="right", padx=4)
 
-        self.mods_counts = tk.Label(f, bg=T.BG, fg=T.MUTED, font=T.SMALL, anchor="w")
-        self.mods_counts.pack(fill="x", pady=(0, 10))
+        counts_row = tk.Frame(f, bg=T.BG)
+        counts_row.pack(fill="x", pady=(0, 10))
+        T.Button(counts_row, "Load order guide", self.show_order_guide, kind="ghost", icon=T.I_HELP, padx=8,
+                 pady=4).pack(side="right")
+        self.btn_autosort = T.Button(counts_row, "Auto-sort load order", self.auto_sort, kind="secondary",
+                                     icon=T.I_SORT, padx=10, pady=4)
+        self.btn_autosort.pack(side="right", padx=6)
+        self.mods_counts = tk.Label(counts_row, bg=T.BG, fg=T.MUTED, font=T.SMALL, anchor="w", justify="left")
+        self.mods_counts.pack(side="left", fill="x", expand=True)
 
         # unsaved load-order bar (shown only while there are staged changes)
         self.order_bar = tk.Frame(f, bg=T.ACCENT_DIM)
@@ -678,6 +686,7 @@ class App(tk.Tk):
                  + (f"   ·   Load order unavailable: {self.order_err}" if self.order_err else "")
                  + ("" if self.game_ver else "   ·   launch the game once so its version can be detected"))
         self.render_order_bar()
+        self.btn_autosort.set_enabled(self.mod_sii is not None and not self.order_err and len(self.mod_order) > 1)
         if keep is None:
             self.show_mod_detail()
 
@@ -725,6 +734,21 @@ class App(tk.Tk):
                              *([("OUTDATED", T.ACCENT_DIM, T.ACCENT)] if c == "outdated" else [])):
             tk.Label(badges, text=text, font=T.BADGE, bg=bg, fg=fg, padx=7, pady=2).pack(side="left", padx=(0, 6))
 
+        if m.source != "missing":
+            group, why = loadorder.classify(m.name, m.categories)
+            gl = tk.Frame(inner, bg=T.SURFACE)
+            gl.pack(fill="x", pady=(0, 10))
+            tk.Label(gl, text=T.I_SORT, font=(T.ICON_FONT[0], 10), bg=T.SURFACE, fg=T.ACCENT).pack(side="left", anchor="n")
+            tk.Label(gl, text=f"{group.title}  ·  {why}", font=T.SMALL, bg=T.SURFACE, fg=T.MUTED, wraplength=270,
+                     justify="left", anchor="w").pack(side="left", padx=(8, 0), fill="x")
+        if notes := loadorder.author_notes(m.description):
+            box = tk.Frame(inner, bg=T.ACCENT_DIM, padx=10, pady=8)
+            box.pack(fill="x", pady=(0, 12))
+            tk.Label(box, text="AUTHOR'S LOAD ORDER NOTE", font=T.CAPS, bg=T.ACCENT_DIM, fg=T.ACCENT).pack(anchor="w")
+            for n in notes:
+                tk.Label(box, text=n, font=T.SMALL, bg=T.ACCENT_DIM, fg=T.TEXT, wraplength=270, justify="left",
+                         anchor="w").pack(fill="x", pady=(4, 0))
+
         grid = tk.Frame(inner, bg=T.SURFACE)
         grid.pack(fill="x")
         works = ", ".join(v.rstrip(".*") for v in m.compatible[:8]) + (" …" if len(m.compatible) > 8 else "")
@@ -732,7 +756,6 @@ class App(tk.Tk):
                  ("Categories", ", ".join(m.categories) or "—"),
                  ("Works with", "any version" if m.universal else (works or "not declared")),
                  ("Size", mods.fmt_size(m.size)),
-                 ("Updated", datetime.fromtimestamp(m.modified).strftime("%b %d, %Y") if m.modified else "—"),
                  ("File", m.path.name))
         if m.source == "missing":
             facts = (("Package", m.package), ("Why", "Still listed as active in your profile, but the mod isn't "
@@ -813,6 +836,69 @@ class App(tk.Tk):
             self.mod_order.insert(new, self.mod_order.pop(pos))
             self.mod_sort = ("order", False)  # show the move where it happened
             self._refresh_after_order_change(m)
+
+    def auto_sort(self):
+        if self.mod_sii is None or self.order_err:
+            T.info(self, "Load order unavailable", self.order_err or "No profile.sii found for this game.")
+            return
+        by_pkg = {m.package: m for m in self.mod_list}
+        new = loadorder.recommended_order(
+            self.mod_order, lambda e: by_pkg[e.package].categories if e.package in by_pkg else [])
+        if new == self.mod_order:
+            self.say("Load order already follows the recommended groups.  Nothing to change.")
+            return
+        moved = sum(a != b for a, b in zip(new, self.mod_order))
+        self.mod_order = new
+        self.mod_sort = ("order", False)
+        self.render_mods(keep=getattr(self.current_mod(), "path", None))
+        self.show_mod_detail()
+        self.say(f"Auto-sorted: {moved} position(s) changed.  Mods keep their relative order inside each group; "
+                 "check any author notes, then Save to game.")
+
+    def show_order_guide(self):
+        win = tk.Toplevel(self, bg=T.SURFACE)
+        win.withdraw()
+        win.title("Load order guide")
+        win.transient(self)
+        win.resizable(False, False)
+        tk.Frame(win, bg=T.ACCENT, height=3).pack(fill="x")
+        body = tk.Frame(win, bg=T.SURFACE, padx=26, pady=22)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="How mod load order works", font=T.H2, bg=T.SURFACE, fg=T.TEXT).pack(anchor="w")
+        tk.Label(body, text="The mod at the top of the in-game Mod Manager (# 1 here) has the highest priority: when two "
+                            "mods change the same file, the higher one wins. Order only matters when mods overlap. "
+                            "Auto-sort uses the groups below, top to bottom, and keeps your own order inside each group.",
+                 font=T.UI, bg=T.SURFACE, fg=T.MUTED, wraplength=620, justify="left").pack(anchor="w", pady=(6, 14))
+        groups = tk.Frame(body, bg=T.RAISED, padx=14, pady=10)
+        groups.pack(fill="x")
+        for i, g in enumerate(loadorder.GROUPS, 1):
+            tk.Label(groups, text=f"{i:>2}", font=T.BADGE, bg=T.RAISED, fg=T.ACCENT).grid(row=i, column=0, sticky="e")
+            tk.Label(groups, text=g.title, font=T.SMALL_BOLD, bg=T.RAISED, fg=T.TEXT).grid(
+                row=i, column=1, sticky="w", padx=(10, 16), pady=1)
+            tk.Label(groups, text=g.examples, font=T.SMALL, bg=T.RAISED, fg=T.MUTED).grid(row=i, column=2, sticky="w")
+        tk.Label(body, text="Rules that beat the groups:  follow each mod author's instructions (shown on the mod's "
+                            "detail panel), keep compatibility patches above the mods they patch, and load map combos "
+                            "exactly in the order the combo's guide gives.",
+                 font=T.SMALL, bg=T.SURFACE, fg=T.TEXT, wraplength=620, justify="left").pack(anchor="w", pady=(14, 12))
+        tk.Label(body, text="SOURCES & FURTHER READING", font=T.CAPS, bg=T.SURFACE, fg=T.FAINT).pack(anchor="w")
+        for title, where, url in loadorder.GUIDES:
+            row = tk.Frame(body, bg=T.SURFACE, cursor="hand2")
+            row.pack(fill="x", pady=(6, 0))
+            a = tk.Label(row, text=title, font=T.SMALL_BOLD, bg=T.SURFACE, fg=T.ACCENT, cursor="hand2")
+            a.pack(side="left")
+            tk.Label(row, text=f"  ·  {where}", font=T.SMALL, bg=T.SURFACE, fg=T.MUTED).pack(side="left")
+            for w in (row, a):
+                w.bind("<ButtonRelease-1>", lambda e, u=url: webbrowser.open(u))
+        bar = tk.Frame(win, bg=T.BG, padx=18, pady=14)
+        bar.pack(fill="x")
+        T.Button(bar, "Close", win.destroy, kind="primary").pack(side="right")
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - win.winfo_reqwidth()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - win.winfo_reqheight()) // 3
+        win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        win.deiconify()
+        T.dark_titlebar(win)
 
     def save_order(self):
         g = core.GAMES[self.mod_game.get()]
