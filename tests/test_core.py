@@ -43,6 +43,29 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(core.is_mapped("input", "``"))
         self.assertFalse(core.is_mapped("mix", None))
 
+    def test_pretty_modifier(self):
+        self.assertEqual(core.pretty_input("mix", "`unbound?0 || modifier(no_cstm_mod?0, short_press(joy.b11?0)) "
+                                                  "| semantical.navmap?0`"), "Joy Btn 11 (tap) (no modifier)")
+        self.assertEqual(core.pretty_input("mix", "`modifier(joy.b5?0, keyboard.h?0) | semantical.horn?0`"),
+                         "Joy Btn 5 + Key H")
+
+    def test_copy_works_both_ways(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            ets2, ats = Path(d, "e"), Path(d, "a")
+            for folder, horn in ((ets2, "`joy.b9?0 | semantical.horn?0`"), (ats, "`keyboard.h?0 | semantical.horn?0`")):
+                folder.mkdir()
+                core.write_text_atomic(folder / "controls.sii", SAMPLE.replace(
+                    "`keyboard.h?0 | joy.b9?0 | semantical.horn?0`", horn))
+            e, a = core.Profile(core.GAMES["ets2"], ets2), core.Profile(core.GAMES["ats"], ats)
+            with mock.patch.object(core, "is_running", return_value=False), \
+                    mock.patch.object(core, "STORE", Path(d, "store")):
+                core.copy_bindings(a, e, [("mix", "horn")])  # ATS -> ETS2
+            self.assertEqual(core.parse_bindings(core.read_text(ets2 / "controls.sii"))[("mix", "horn")],
+                             "`keyboard.h?0 | semantical.horn?0`")
+
     def test_real_profiles_roundtrip(self):
         for key, game in core.GAMES.items():
             for p in core.find_profiles(game):

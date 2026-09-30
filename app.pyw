@@ -302,11 +302,18 @@ class App(tk.Tk):
         actions.pack(side="bottom", fill="x", pady=(12, 0))
         self.sel_label = tk.Label(actions, bg=T.BG, fg=T.MUTED, font=T.SMALL)
         self.sel_label.pack(side="left")
-        T.Button(actions, "Sync all  ETS2 → ATS", lambda: self.copy("ets2", "ats", True), kind="primary",
-                 icon=T.I_SYNC).pack(side="right")
+        # both directions: whichever game you changed last is the one worth copying from (it gets the primary style)
+        self.btn_sync = {
+            ("ets2", "ats"): T.Button(actions, "Sync all  ETS2 → ATS", lambda: self.copy("ets2", "ats", True),
+                                      icon=T.I_SYNC),
+            ("ats", "ets2"): T.Button(actions, "Sync all  ATS → ETS2", lambda: self.copy("ats", "ets2", True),
+                                      icon=T.I_SYNC),
+        }
+        for b in self.btn_sync.values():
+            b.pack(side="right", padx=(8, 0))
         self.btn_to_ets2 = T.Button(actions, "Copy selected to ETS2", lambda: self.copy("ats", "ets2"),
                                     icon=T.I_BACK)
-        self.btn_to_ets2.pack(side="right", padx=8)
+        self.btn_to_ets2.pack(side="right", padx=(8, 16))
         self.btn_to_ats = T.Button(actions, "Copy selected to ATS", lambda: self.copy("ets2", "ats"),
                                    icon=T.I_FORWARD)
         self.btn_to_ats.pack(side="right")
@@ -329,6 +336,14 @@ class App(tk.Tk):
         self.cmp_rows = [] if not (e and a) else core.diff_bindings(
             core.parse_bindings(core.read_text(e.path / "controls.sii")),
             core.parse_bindings(core.read_text(a.path / "controls.sii")))
+        changed = {k: core.controls_changed(p) for k, p in (("ets2", e), ("ats", a)) if p}
+        self.cmp_newer = max(changed, key=changed.get) if len(changed) == 2 and changed["ets2"] != changed["ats"] else None
+        stamp = lambda k: (f"  ·  changed {changed[k].strftime('%b %d, %H:%M')}" if k in changed else "") + (
+            "  ·  NEWER" if k == self.cmp_newer else "")
+        self.cmp.set_titles("ETS2  ·  EURO TRUCK SIMULATOR 2" + stamp("ets2"),
+                            "ATS  ·  AMERICAN TRUCK SIMULATOR" + stamp("ats"))
+        for (src, _), b in self.btn_sync.items():
+            b.set_kind("primary" if src == self.cmp_newer else "secondary")
         self.render_compare()
 
     def render_compare(self):
@@ -341,8 +356,11 @@ class App(tk.Tk):
         hidden = "" if self.show_unmapped.get() else f"   ·   {len(rows) - len(mapped)} unmapped hidden"
         self.cmp_counts.config(text=f"{shared} differ   ·   {len(mapped) - shared} in one game only{hidden}")
         self.update_selection()
+        newer = getattr(self, "cmp_newer", None)
+        hint = (f"  {newer.upper()} was changed more recently - Sync all {newer.upper()} → "
+                f"{'ATS' if newer == 'ets2' else 'ETS2'} keeps those changes." if newer and shared else "")
         self.say(f"{shared} mapped binding(s) differ between ETS2 and ATS; "
-                 f"{len(mapped) - shared} mapped action(s) exist in only one game.")
+                 f"{len(mapped) - shared} mapped action(s) exist in only one game.{hint}")
 
     def copy(self, src_key, dst_key, everything=False):
         src, dst = self.profile(src_key), self.profile(dst_key)
@@ -740,6 +758,8 @@ class App(tk.Tk):
             gl = tk.Frame(inner, bg=T.SURFACE)
             gl.pack(fill="x", pady=(0, 10))
             tk.Label(gl, text=T.I_SORT, font=(T.ICON_FONT[0], 10), bg=T.SURFACE, fg=T.ACCENT).pack(side="left", anchor="n")
+            if rule := loadorder.placement(m.description).describe():
+                why += f"  ·  author's note: {rule}"
             tk.Label(gl, text=f"{group.title}  ·  {why}", font=T.SMALL, bg=T.SURFACE, fg=T.MUTED, wraplength=270,
                      justify="left", anchor="w").pack(side="left", padx=(8, 0), fill="x")
         if notes := loadorder.author_notes(m.description):
@@ -844,7 +864,8 @@ class App(tk.Tk):
             return
         by_pkg = {m.package: m for m in self.mod_list}
         new = loadorder.recommended_order(
-            self.mod_order, lambda e: by_pkg[e.package].categories if e.package in by_pkg else [])
+            self.mod_order, lambda e: by_pkg[e.package].categories if e.package in by_pkg else [],
+            lambda e: by_pkg[e.package].description if e.package in by_pkg else "")
         if new == self.mod_order:
             self.say("Load order already follows the recommended groups.  Nothing to change.")
             return
@@ -853,8 +874,8 @@ class App(tk.Tk):
         self.mod_sort = ("order", False)
         self.render_mods(keep=getattr(self.current_mod(), "path", None))
         self.show_mod_detail()
-        self.say(f"Auto-sorted: {moved} position(s) changed.  Mods keep their relative order inside each group; "
-                 "check any author notes, then Save to game.")
+        self.say(f"Auto-sorted: {moved} position(s) changed, following the groups and each mod author's load order "
+                 "notes.  Review, then Save to game.")
 
     def show_order_guide(self):
         win = tk.Toplevel(self, bg=T.SURFACE)
@@ -868,7 +889,9 @@ class App(tk.Tk):
         tk.Label(body, text="How mod load order works", font=T.H2, bg=T.SURFACE, fg=T.TEXT).pack(anchor="w")
         tk.Label(body, text="The mod at the top of the in-game Mod Manager (# 1 here) has the highest priority: when two "
                             "mods change the same file, the higher one wins. Order only matters when mods overlap. "
-                            "Auto-sort uses the groups below, top to bottom, and keeps your own order inside each group.",
+                            "Auto-sort uses the groups below, top to bottom, and keeps your own order inside each group, "
+                            "then follows what each mod's own description says: 'high priority' moves it to the top of "
+                            "its group, 'place above / below X' puts it above or below mod X.",
                  font=T.UI, bg=T.SURFACE, fg=T.MUTED, wraplength=620, justify="left").pack(anchor="w", pady=(6, 14))
         groups = tk.Frame(body, bg=T.RAISED, padx=14, pady=10)
         groups.pack(fill="x")
@@ -1253,7 +1276,8 @@ class App(tk.Tk):
                 warnings.append(f"{k.upper()}: {len(rows)} binding(s) changed since the last snapshot "
                                 f"({when(snaps[0].created)})")
         if warnings:
-            self.banner_text.config(text="\n".join(warnings) + "\nIf that was you, take a new snapshot.")
+            self.banner_text.config(text="\n".join(warnings) + "\nIf that was you, take a new snapshot "
+                                    "(and use Compare to copy them to the other game). If the game reset them, restore.")
             self.banner.pack(fill="x", padx=32, pady=(22, 0), before=self.pages_host)
 
 

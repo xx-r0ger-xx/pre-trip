@@ -69,6 +69,11 @@ def control_files(folder: Path) -> list[Path]:
     return sorted(p for p in folder.iterdir() if p.is_file() and CONTROL_FILE_RE.match(p.name))
 
 
+def controls_changed(profile: Profile) -> datetime:
+    """When the game last saved this profile's controls.sii."""
+    return datetime.fromtimestamp((profile.path / "controls.sii").stat().st_mtime)
+
+
 def is_running(game: Game) -> bool:
     out = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {game.exe}", "/NH"],
                          capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW).stdout
@@ -114,6 +119,7 @@ def is_mapped(kind: str, value: str | None) -> bool:
 
 _DEVICE_RE = re.compile(r"\b([a-z]+)(\d*)\.(\w+)")
 _PRESS_RE = re.compile(r"\b(short|long)_press\(([^()]*)\)")
+_MODIFIER_RE = re.compile(r"^modifier\(\s*([^,()]+?)\s*,\s*(.+)\)$")  # modifier(no_cstm_mod, short_press(joy.b11))
 
 
 def _pretty_token(m: re.Match) -> str:
@@ -140,6 +146,8 @@ def pretty_input(kind: str, value: str | None) -> str | None:
         if not part or part.startswith(("semantical.", "unbound")):
             continue
         part = _PRESS_RE.sub(lambda m: f"{m[2]} ({'tap' if m[1] == 'short' else 'hold'})", part)
+        if m := _MODIFIER_RE.match(part):  # no_cstm_mod = only when no custom modifier is held
+            part = f"{m[2]} (no modifier)" if m[1] == "no_cstm_mod" else f"{m[1]} + {m[2]}"
         parts.append(_DEVICE_RE.sub(_pretty_token, part))
     return "  ·  ".join(parts) or "Unbound"
 

@@ -171,13 +171,6 @@ def classify(name: str, categories: list[str] | tuple = ()) -> tuple[Group, str]
     return g, why
 
 
-def recommended_order(order: list[Entry], categories_for) -> list[Entry]:
-    """Stable sort by group: keeps the user's relative order inside each group. categories_for(entry) -> list."""
-    rank = {g.key: i for i, g in enumerate(GROUPS)}
-    return [e for _, _, e in sorted(
-        (rank[classify(e.display or e.package, categories_for(e))[0].key], i, e) for i, e in enumerate(order))]
-
-
 PRIORITY_NOTE_RE = re.compile(
     r"[^.!\n]*\b(priority|load order|mod manager|(place|put|load|keep|position)\w*\b[^.!\n]*\b(above|below|over|under"
     r"|higher|lower|top|bottom))\b[^.!\n]*[.!]?", re.I)
@@ -187,6 +180,88 @@ def author_notes(description: str) -> list[str]:
     """Sentences in a mod description that give load-order instructions."""
     notes = (m[0].strip() for m in PRIORITY_NOTE_RE.finditer(description))
     return [n for n in notes if len(n) > 12][:4]
+
+
+# What auto-sort reads out of those sentences. Only the author's own words drive it - no per-mod rules in the app.
+_TOP_RE = re.compile(r"\b(high(est)?|top) pr?iority\b|\bon top\b(?!\s+of\s+(?!(the\s+)?(mod manager|list|load order)))"
+                     r"|\b(at the |to the )?top of (the )?(mod manager|list|load order)\b", re.I)
+_BOTTOM_RE = re.compile(r"\blow(est)? priority\b|\b(at|on|to) the bottom\b|\bbottom of (the )?(mod manager|list|load order)\b",
+                        re.I)
+_RELATIVE_RE = re.compile(r"\b(above|over|higher than|below|under|lower than)\s+(.+)", re.I)
+_TARGET_JUNK_RE = re.compile(r"\b(in|of) (the )?(mod manager|load order|list)\b.*|\b(either|any|all|the|mods?|v?\d[\w.]*)\b",
+                             re.I)
+
+
+@dataclass(frozen=True)
+class Placement:
+    pin: int = 0  # -1 top of its group, 1 bottom of its group
+    above: tuple[str, ...] = ()  # names (or name fragments) of mods this one must sit above
+    below: tuple[str, ...] = ()
+
+    def describe(self) -> str:
+        parts = [{-1: "top of its group", 1: "bottom of its group"}[self.pin]] if self.pin else []
+        parts += [f"above {', '.join(self.above)}"] * bool(self.above) + [f"below {', '.join(self.below)}"] * bool(self.below)
+        return "; ".join(parts)
+
+
+def _targets(text: str) -> tuple[str, ...]:
+    out = []
+    for piece in re.split(r",|/|&|\bor\b|\band\b", text):
+        piece = re.sub(r"\s+", " ", _TARGET_JUNK_RE.sub(" ", piece)).strip(" -()'\"")
+        if len(piece) >= 3:
+            out.append(piece)
+    return tuple(out)
+
+
+def placement(description: str) -> Placement:
+    """Turn an author's load-order sentences into a Placement: 'give HIGH priority' -> top of its group,
+    'place above New Summer, Spring or Early Autumn' -> must sit above any active mod with one of those names."""
+    pin, above, below = 0, [], []
+    for note in author_notes(description):
+        if m := _RELATIVE_RE.search(note):
+            names = _targets(re.split(r"[.!;(]", m[2])[0])
+            if names:
+                (above if m[1].lower() in ("above", "over", "higher than") else below).extend(names)
+                continue
+        if _TOP_RE.search(note):
+            pin = pin or -1
+        elif _BOTTOM_RE.search(note):
+            pin = pin or 1
+    return Placement(pin, tuple(dict.fromkeys(above)), tuple(dict.fromkeys(below)))
+
+
+def _name(e: Entry) -> str:
+    return (e.display or e.package).replace("_", " ")
+
+
+def _matches(fragment: str, e: Entry) -> bool:
+    return re.search(r"(?<!\w)" + re.escape(fragment) + r"(?!\w)", _name(e), re.I) is not None
+
+
+def recommended_order(order: list[Entry], categories_for, description_for=lambda e: "") -> list[Entry]:
+    """Group sort that keeps the user's relative order inside each group, adjusted by what each mod's author says:
+    'high/top priority' moves a mod to the top of its group, 'place above/below X' beats the groups.
+    categories_for(entry) -> list, description_for(entry) -> str."""
+    rank = {g.key: i for i, g in enumerate(GROUPS)}
+    place = {e: placement(description_for(e) or "") for e in order}
+    new = [e for *_, e in sorted(
+        (rank[classify(_name(e), categories_for(e))[0].key], place[e].pin, i, e) for i, e in enumerate(order))]
+    for _ in range(len(new)):  # relative rules; bounded so contradictory notes can't loop forever
+        moved = False
+        for e in list(new):
+            p = place[e]
+            ups = [i for i, o in enumerate(new) if o != e and any(_matches(f, o) for f in p.above)]
+            downs = [i for i, o in enumerate(new) if o != e and any(_matches(f, o) for f in p.below)]
+            here = new.index(e)
+            if ups and here > ups[0]:
+                new.insert(ups[0], new.pop(here))
+                moved = True
+            elif downs and here < downs[-1]:
+                new.insert(downs[-1], new.pop(here))
+                moved = True
+        if not moved:
+            break
+    return new
 
 
 def backup(path: Path, game: core.Game) -> Path:

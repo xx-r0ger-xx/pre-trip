@@ -105,6 +105,29 @@ class RecommendedOrderTests(unittest.TestCase):
         new = loadorder.recommended_order(order, lambda e: cats[e.package])
         self.assertEqual([e.package for e in new], ["w", "t2", "t1", "m"])  # traffic keeps B before A
 
+    def test_placement_from_notes(self):
+        P = loadorder.placement
+        rrr = P("Place above either New Summer, Spring, Early Autumn or Late Autumn/Mild Winter in Mod Manager")
+        self.assertEqual(rrr.above, ("New Summer", "Spring", "Early Autumn", "Late Autumn", "Mild Winter"))
+        self.assertEqual(P("Early Autumn should be given a HIGH priority in Mod Manager.").pin, -1)
+        self.assertEqual(P("(sound fixes pack is exceptional but put my mod on top piority)").pin, -1)
+        self.assertEqual(P("Load this below ProMods in the mod manager.").below, ("ProMods",))
+        self.assertEqual(P("-Added Liters in the tank (At the bottom of the display)"), loadorder.Placement())
+        self.assertEqual(P("Adds a light bar on top of the cab."), loadorder.Placement())
+
+    def test_notes_drive_the_sort(self):
+        E = loadorder.Entry
+        notes = {"ea": "Early Autumn should be given a HIGH priority in Mod Manager.",
+                 "rrr": "Place above either New Summer, Spring, Early Autumn or Late Autumn in Mod Manager",
+                 "w": "", "s": ""}
+        order = [E("w", "Other Weather"), E("ea", "Early Autumn v4.6"), E("s", "Sound Fixes Pack"),
+                 E("rrr", "Realistic Rain Reflections v2.5")]
+        new = loadorder.recommended_order(order, lambda e: [], lambda e: notes[e.package])
+        self.assertEqual([e.package for e in new], ["rrr", "ea", "w", "s"])
+        loop = {"a": "Place above B Mod.", "b": "Place above A Mod."}
+        pair = [E("a", "A Mod"), E("b", "B Mod")]
+        self.assertEqual(len(loadorder.recommended_order(pair, lambda e: [], lambda e: loop[e.package])), 2)
+
     def test_author_notes(self):
         self.assertEqual(loadorder.author_notes("Give this a HIGH priority in Mod Manager. Enjoy!"),
                          ["Give this a HIGH priority in Mod Manager."])

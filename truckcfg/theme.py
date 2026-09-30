@@ -266,6 +266,13 @@ class Button(tk.Frame):
         if self.enabled and self.command:
             self.command()
 
+    def set_kind(self, kind: str):
+        bg, hover, fg = self.KINDS[kind]
+        self._bg, self._hover, self._fg, self._kind = bg or self.master["bg"], hover, fg, kind
+        if self._bg == hover:
+            self._hover = HOVER
+        self.set_enabled(self.enabled)
+
     def set_enabled(self, on: bool):
         self.enabled = on
         self.configure(cursor="hand2" if on else "arrow")
