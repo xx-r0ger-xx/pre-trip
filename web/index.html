@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Truck Config Manager</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><div class="road"></div><div class="grain"></div></div>
+<div class="app">
+  <nav class="rail" aria-label="Sections">
+    <div class="logo" title="Truck Config Manager" id="logo"></div>
+    <button class="nav" data-view="pretrip" id="nav-pretrip"></button>
+    <button class="nav" data-view="twin" id="nav-twin"></button>
+    <button class="nav" data-view="studio" id="nav-studio"></button>
+    <button class="nav" data-view="garage" id="nav-garage"></button>
+    <button class="nav" data-view="logbook" id="nav-logbook"></button>
+    <div class="rail-foot">
+      <div class="lamp" id="lamp-ets2" title="Euro Truck Simulator 2"><i></i>ETS2</div>
+      <div class="lamp" id="lamp-ats" title="American Truck Simulator"><i></i>ATS</div>
+    </div>
+  </nav>
+  <div class="main">
+    <header class="top">
+      <div class="grow"><h1 class="disp" id="title">Pre-Trip</h1><div class="sub" id="subtitle"></div></div>
+      <div id="top-actions" class="row"></div>
+    </header>
+    <div class="scroll" id="scroll"><div id="view" class="view"></div></div>
+  </div>
+</div>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+<div class="dock" id="dock" role="status"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="modal-bg" id="modal"><div class="modal" role="dialog" aria-modal="true" id="modal-box"></div></div>
+<div id="tip" style="position:fixed;z-index:70;pointer-events:none;opacity:0;transition:opacity .15s;padding:8px 10px;border-radius:9px;background:rgba(18,23,31,.97);border:1px solid rgba(255,255,255,.13);font-size:12px;max-width:280px;box-shadow:0 10px 30px rgba(0,0,0,.5)"></div>
+<script src="app.js"></script>
+</body>
+</html>

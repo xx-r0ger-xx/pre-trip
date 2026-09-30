@@ -33,6 +33,29 @@ and it takes an automatic snapshot first, so every change can be undone.
 pythonw app.pyw
 ```
 
+## Web UI (preview)
+
+`webapp.pyw` is a new front end on the same back end, in a native window (pywebview + WebView2):
+
+- **Pre-Trip** – health check with gauges: mods current for the installed version, file overlaps between
+  active mods, bindings changed since the last snapshot, days since the last crash.
+- **Twin Rigs** – ETS2 and ATS side by side: controls, graphics settings (`config.cfg`), ReShade files
+  and preset, and matching mods. One direction switch and one Sync button. Hidden on PCs with one game.
+- **Studio** – drag-and-drop load order in colored group lanes, live ▲/▼ badges for files a mod wins or
+  loses to another, author notes, and an auto-sort that follows each author's own instructions.
+- **Garage** – mod gallery using each mod's preview image, plus named loadouts
+  (`TruckSim-Configs\loadouts`).
+- **Logbook** – timeline of snapshots, load-order and graphics backups, game updates and crashes, each
+  restorable. Reads `game.crash.txt`/`game.log.txt`, and a crash finder that switches half the mods off
+  per round to find the one crashing the game.
+
+```
+pip install pywebview
+pythonw webapp.pyw
+```
+
+Set `TCM_GAMES=ets2` (or `ats`) to preview the one-game experience on a PC that has both.
+
 Tests: `python -m unittest -v tests.test_core tests.test_mods_cleanup`
 
 ## Notes

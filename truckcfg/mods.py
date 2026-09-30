@@ -40,6 +40,8 @@ class Mod:
     universal: bool = False  # has a package with no version restriction (SCS fallback package)
     display: str = ""  # manifest display_name - what the game writes into active_mods
     pkg_id: str = ""  # set for "missing" rows: active in the profile but not installed
+    package_path: Path | None = None  # the .scs/.zip/folder holding manifest.sii (Workshop: the chosen version)
+    icon: str = ""  # manifest icon, relative to package_path
 
     @property
     def package(self) -> str:
@@ -150,6 +152,7 @@ def _apply_manifest(mod: Mod, read) -> None:
     mod.version = _first(m, "package_version")
     mod.author = _first(m, "author")
     mod.categories = m.get("category", [])
+    mod.icon = _first(m, "icon")
     mod.compatible = mod.compatible or m.get("compatible_versions", [])
     if desc := _first(m, "description_file"):
         mod.description = strip_markup(read(desc) or "")
@@ -207,6 +210,7 @@ def local_mods(game: core.Game) -> list[Mod]:
                 continue
             mod = Mod(game, "local", p, enabled, name=_pretty_filename(p.stem), size=_size(p),
                       modified=p.stat().st_mtime)
+            mod.package_path = p
             if read := _reader(p):
                 _apply_manifest(mod, read)
             out.append(mod)
@@ -237,6 +241,7 @@ def workshop_mods(game: core.Game) -> list[Mod]:
                             if cand.exists():
                                 pkg = cand
                                 break
+            mod.package_path = pkg
             if pkg and (read := _reader(pkg)):
                 _apply_manifest(mod, read)
             out.append(mod)
