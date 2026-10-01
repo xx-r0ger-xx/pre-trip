@@ -218,7 +218,7 @@ async function renderPretrip(rescan = false) {
       ${c.ack ? `<button class="btn sm ghost" data-ack="${i}" data-g="${g}" data-tip="Hide this until something changes">${I.check}Acknowledge</button>` : ""}`}</div></div>`;
   v.innerHTML = `
     <div class="pt-head">
-      <div class="grow"><div class="caps">Inspection</div><div class="disp" style="font-size:22px;margin-top:4px">${total ? `${total} thing${total > 1 ? "s" : ""} to look at before you drive` : (S.owned.length > 1 ? "Both rigs are ready to roll" : "Your rig is ready to roll")}</div></div>
+      <div class="grow"><div class="disp" style="font-size:22px">${total ? `${total} thing${total > 1 ? "s" : ""} to look at before you drive` : (S.owned.length > 1 ? "Both rigs are ready to roll" : "Your rig is ready to roll")}</div></div>
       <button class="btn primary" id="rescan">${I.gauge}Run inspection</button>
     </div>
     <div class="clusters">${S.owned.map((g, gi) => {
