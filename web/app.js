@@ -34,6 +34,7 @@ const I = {
   update: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
   box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>',
   sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12m4 0h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
+  leaf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19c0-8 5-14 15-15-1 10-7 15-15 15Z"/><path d="M5 19 13 11"/></svg>',
   pad: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 7h10a5 5 0 0 1 4.8 6.3l-1 3.8a2.5 2.5 0 0 1-4.3 1L14.3 16H9.7l-2.2 2.1a2.5 2.5 0 0 1-4.3-1l-1-3.8A5 5 0 0 1 7 7Z"/><path d="M7.5 10.5v3M6 12h3M15.5 11.5h.1M17.5 13h.1"/></svg>',
 };
 
@@ -133,6 +134,7 @@ function initShell() {
     const b = $("#nav-" + k); b.innerHTML = `${v.icon}<span>${v.label}</span>`; b.onclick = () => go(k);
   }
   $("#scrim").onclick = closeDrawer;
+  const sb = $("#scenery"); sb.innerHTML = I.leaf; sb.onclick = () => setScenery(!sceneryOn); setScenery(sceneryOn);
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") closeDrawer();
     if (S.view === "studio" && e.altKey && S.selPkg && (e.key === "ArrowUp" || e.key === "ArrowDown")) { e.preventDefault(); nudge(S.selPkg, e.key === "ArrowUp" ? -1 : 1) }
@@ -715,51 +717,127 @@ function paintFinder(g) {
   };
 }
 
-// ---------------------------------------------------------------- backdrop road
-// True perspective, not a tilted CSS plane: screen y = horizon + depthScale / z, and the road's half-width
-// shrinks with the same factor, so every dash slides straight down the centre line toward the driver.
+// ---------------------------------------------------------------- backdrop: Golden Hour road
+// True 1/z perspective: screen y = horizon + span * NEAR / z and every lateral offset shrinks by the same factor,
+// so dashes, trees and leaf litter all travel straight down the road toward the driver. Scenery can be switched off
+// (rail toggle), which leaves just the road.
+const SCENE = {
+  sky: ["#1a1220", "#4a2a2c", "#a4502c", "#f0a040"], glow: "rgba(255,200,110,.45)", hills: ["#3a2224", "#2a181c"],
+  ground: ["#2a1d14", "#3a2a1c"], verge: "#4a3420", fog: "#c47a44",
+  palette: ["#e0541e", "#f0922e", "#f4c242", "#b8301f", "#d8702a"], pine: "#2c4630", trunk: "#3a2618", rim: .55,
+};
+const hexRGB = h => h.startsWith("rgb") ? h.match(/\d+/g).slice(0, 3).map(Number) : [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const mixC = (a, b, t) => { const A = hexRGB(a), B = hexRGB(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(",")})` };
+const clamp01 = v => Math.max(0, Math.min(1, v));
+function seeded(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296) }
+let sceneryOn = true;
+try { sceneryOn = localStorage.getItem("tcm-scenery") !== "off" } catch (e) {}
+
 function startRoad() {
-  const cv = $("#road"), ctx = cv.getContext("2d");
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const NEAR = 12, FAR = 400, PERIOD = 10, DASH = 3.6, SPEED = 26;  // metres-ish: bottom edge is 12 m ahead
-  let W = 0, H = 0, dpr = 1;
-  const size = () => {
-    dpr = Math.min(devicePixelRatio || 1, 2); W = cv.clientWidth; H = cv.clientHeight;
-    cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  };
+  const cv = $("#road"), ctx = cv.getContext("2d"), still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const NEAR = 12, FAR = 320, PERIOD = 10, DASH = 3.6, SPEED = 26, r = seeded(4242), sc = SCENE;
+  let W = 0, H = 0, dist = 0, last = performance.now();
+  const size = () => { const d = Math.min(devicePixelRatio || 1, 2); W = cv.clientWidth; H = cv.clientHeight; cv.width = W * d; cv.height = H * d; ctx.setTransform(d, 0, 0, d, 0, 0) };
   size(); addEventListener("resize", size);
+  const pick = () => sc.palette[Math.floor(r() * sc.palette.length)];
+  const hills = [0, 1].map(l => Array.from({ length: 61 }, (_, i) => .03 + .045 * (l ? .6 : 1) * (Math.sin(i * .5 + l * 2 + r()) * .5 + .5) + r() * .012));
+  const trees = [];
+  for (const side of [-1, 1]) for (let i = 0; i < 44; i++) {
+    const kind = r(), bush = kind < .32;
+    trees.push({ z: (FAR / 44) * i + r() * 6, side, bush, pine: !bush && kind > .82, u: bush ? 1.38 + r() * .9 : 1.75 + r() * 2.8,
+      h: bush ? .55 + r() * .45 : 2.0 + r() * 1.6, col: pick(),
+      blobs: Array.from({ length: bush ? 3 : 6 }, () => bush ? [r() * .7, 0, .16 + r() * .16] : [(r() - .5) * 1.05, (r() - .5) * .7, .42 + r() * .3]) });
+  }
+  const litter = Array.from({ length: 90 }, () => ({ z: NEAR + r() * FAR, side: r() < .5 ? -1 : 1, u: 1.02 + r() * .32, c: pick() }));
+  const leaves = Array.from({ length: 55 }, () => ({ x: r() * 1.2, y: r(), s: 2.5 + r() * 3.5, v: .02 + r() * .05, w: r() * 6, c: pick() }));
+
   const frame = now => {
-    const hy = H * 0.08, cx = 88 + (W - 88) / 2, half = Math.min(W * 0.34, 620), span = H - hy;
-    const y = z => hy + span * (NEAR / z);                 // depth -> screen row
-    const k = z => NEAR / z;                               // depth -> scale (1 at the bottom edge)
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    if (!still) dist += dt * SPEED;
+    const hy = H * .42, span = H - hy, cx = 88 + (W - 88) / 2, half = Math.min(W * .30, 640);
+    const k = z => NEAR / z, y = z => hy + span * k(z), X = (u, z) => cx + u * half * k(z), fogAt = kk => 1 - clamp01((kk - .03) / .4);
     ctx.clearRect(0, 0, W, H);
-    // asphalt
-    const asphalt = ctx.createLinearGradient(0, hy, 0, H);
-    asphalt.addColorStop(0, "rgba(255,255,255,0)"); asphalt.addColorStop(1, "rgba(255,255,255,.035)");
-    ctx.fillStyle = asphalt;
-    ctx.beginPath(); ctx.moveTo(cx, hy); ctx.lineTo(cx + half, H); ctx.lineTo(cx - half, H); ctx.closePath(); ctx.fill();
-    // solid white edge lines, converging on the vanishing point
-    for (const s of [-1, 1]) {
-      const g = ctx.createLinearGradient(0, hy, 0, H);
-      g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(255,255,255,.22)");
-      ctx.fillStyle = g; ctx.beginPath();
-      ctx.moveTo(cx + s * 0.5, hy); ctx.lineTo(cx + s * (half + 3), H); ctx.lineTo(cx + s * (half - 3), H); ctx.closePath(); ctx.fill();
+    const road = () => {
+      ctx.beginPath(); ctx.moveTo(cx - 1, hy); ctx.lineTo(cx + 1, hy); ctx.lineTo(X(1, NEAR), H); ctx.lineTo(X(-1, NEAR), H); ctx.closePath();
+    };
+    if (sceneryOn) {
+      // sky, sun, hills
+      const sky = ctx.createLinearGradient(0, 0, 0, hy); sc.sky.forEach((c, i) => sky.addColorStop(i / (sc.sky.length - 1), c));
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, W, hy + 1);
+      const glow = ctx.createRadialGradient(cx, hy, 0, cx, hy, W * .6); glow.addColorStop(0, sc.glow); glow.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = glow; ctx.fillRect(0, 0, W, hy + 2);
+      const sx = cx + W * .18, sy = hy - H * .05, sun = ctx.createRadialGradient(sx, sy, 0, sx, sy, H * .09);
+      sun.addColorStop(0, "rgba(255,236,190,.95)"); sun.addColorStop(.4, "rgba(255,200,120,.5)"); sun.addColorStop(1, "rgba(255,180,90,0)");
+      ctx.fillStyle = sun; ctx.fillRect(0, 0, W, hy);
+      hills.forEach((pts, l) => { ctx.fillStyle = sc.hills[l]; ctx.beginPath(); ctx.moveTo(0, hy); pts.forEach((p, i) => ctx.lineTo(i / (pts.length - 1) * W, hy - p * H * (l ? .75 : 1))); ctx.lineTo(W, hy); ctx.closePath(); ctx.fill() });
+      // ground and leafy verges
+      const gr = ctx.createLinearGradient(0, hy, 0, H); gr.addColorStop(0, sc.fog); gr.addColorStop(.12, sc.ground[0]); gr.addColorStop(1, sc.ground[1]);
+      ctx.fillStyle = gr; ctx.fillRect(0, hy, W, span);
+      for (const s of [-1, 1]) { ctx.fillStyle = sc.verge; ctx.beginPath(); ctx.moveTo(cx, hy); ctx.lineTo(X(s * 1.32, NEAR), H); ctx.lineTo(X(s, NEAR), H); ctx.closePath(); ctx.fill() }
     }
-    // amber centre dashes moving toward the driver
-    const offset = still ? 0 : ((now / 1000) * SPEED) % PERIOD;
-    for (let z0 = NEAR - offset; z0 < FAR; z0 += PERIOD) {
-      const a = Math.max(z0, NEAR), b = z0 + DASH;
-      if (b <= NEAR) continue;
-      const ya = y(a), yb = y(b), wa = 5 * k(a), wb = 5 * k(b);
-      const alpha = Math.min(1, (ya - hy) / span * 3.2) * 0.42;
-      ctx.fillStyle = `rgba(255,176,32,${alpha.toFixed(3)})`;
-      ctx.beginPath(); ctx.moveTo(cx - wa, ya); ctx.lineTo(cx + wa, ya); ctx.lineTo(cx + wb, yb); ctx.lineTo(cx - wb, yb); ctx.closePath(); ctx.fill();
+    // light grey asphalt, white edges, amber centre dashes
+    const as = ctx.createLinearGradient(0, hy, 0, H);
+    as.addColorStop(0, sceneryOn ? mixC("#2a2f36", sc.fog, .45) : "rgba(60,66,74,0)"); as.addColorStop(.35, "#3b4148"); as.addColorStop(1, "#5d636b");
+    ctx.fillStyle = as; road(); ctx.fill();
+    for (const s of [-1, 1]) { ctx.fillStyle = "rgba(235,240,245,.55)"; ctx.beginPath(); ctx.moveTo(cx + s * .4, hy); ctx.lineTo(X(s * .985, NEAR), H); ctx.lineTo(X(s * .945, NEAR), H); ctx.closePath(); ctx.fill() }
+    const off = dist % PERIOD;
+    for (let z0 = NEAR - off; z0 < FAR; z0 += PERIOD) {
+      const a = Math.max(z0, NEAR), b = z0 + DASH; if (b <= NEAR) continue;
+      const wa = .022 * half * k(a), wb = .022 * half * k(b);
+      ctx.fillStyle = `rgba(255,176,32,${(.85 * clamp01((y(a) - hy) / span * 3)).toFixed(3)})`;
+      ctx.beginPath(); ctx.moveTo(cx - wa, y(a)); ctx.lineTo(cx + wa, y(a)); ctx.lineTo(cx + wb, y(b)); ctx.lineTo(cx - wb, y(b)); ctx.closePath(); ctx.fill();
+    }
+    if (sceneryOn) {
+      for (const l of litter) {
+        const z = ((l.z - dist) % FAR + FAR) % FAR + NEAR * .9, kk = k(z), s = Math.max(.6, 3.4 * kk);
+        ctx.fillStyle = mixC(l.c, sc.fog, fogAt(kk) * .9); ctx.fillRect(X(l.side * l.u, z) - s / 2, y(z) - s / 3, s, s * .6);
+      }
+      const list = trees.map(t => ({ t, z: ((t.z - dist) % FAR + FAR) % FAR + NEAR * .95 })).sort((p, q) => q.z - p.z);
+      for (const { t, z } of list) {
+        const kk = k(z), bx = X(t.side * t.u, z), by = y(z), s = half * kk;
+        if (bx < -s * 2 || bx > W + s * 2) continue;
+        const shade = fogAt(kk) * .88, C = c => mixC(c, sc.fog, shade), th = t.h * s;
+        if (t.bush) {
+          ctx.fillStyle = C(mixC(t.col, "#1a1208", .3));
+          for (const [dx, , rr] of t.blobs) { const R = rr * s; ctx.beginPath(); ctx.arc(bx + t.side * dx * s, by - R * .7, R, 0, Math.PI * 2); ctx.fill() }
+          continue;
+        }
+        ctx.fillStyle = C(sc.trunk); ctx.fillRect(bx - .05 * s, by - th * .3, .1 * s, th * .3);
+        if (t.pine) {
+          ctx.fillStyle = C(sc.pine);
+          for (let i = 0; i < 3; i++) { const w = (.62 - i * .14) * s, top = by - th * (.3 + i * .22) - th * .34; ctx.beginPath(); ctx.moveTo(bx, top); ctx.lineTo(bx + w, top + th * .42); ctx.lineTo(bx - w, top + th * .42); ctx.closePath(); ctx.fill() }
+          continue;
+        }
+        const cy = by - th * .62;
+        ctx.fillStyle = C(t.col);
+        for (const [dx, dy, rr] of t.blobs) { ctx.beginPath(); ctx.arc(bx + dx * s, cy + dy * s, rr * s, 0, Math.PI * 2); ctx.fill() }
+        ctx.globalAlpha = sc.rim * (1 - shade); ctx.fillStyle = C("#ffd28a");
+        for (const [dx, dy, rr] of t.blobs.slice(0, 2)) { ctx.beginPath(); ctx.arc(bx + dx * s - rr * s * .15, cy + dy * s - rr * s * .25, rr * s * .55, 0, Math.PI * 2); ctx.fill() }
+        ctx.globalAlpha = 1;
+      }
+      // falling leaves
+      for (const l of leaves) {
+        if (!still) { l.y += l.v * dt * 1.4; l.x -= l.v * dt * .6; l.w += dt * 3; if (l.y > 1.05) { l.y = -.05; l.x = Math.random() * 1.2 } }
+        ctx.save(); ctx.translate((l.x + Math.sin(l.w) * .01) * W, l.y * H); ctx.rotate(l.w);
+        ctx.fillStyle = l.c; ctx.globalAlpha = .75; ctx.fillRect(-l.s, -l.s / 2, l.s * 2, l.s); ctx.restore();
+      }
+      // vignette and a darker band behind the page header keep text readable
+      const v = ctx.createRadialGradient(cx, H * .55, Math.min(W, H) * .35, cx, H * .55, Math.max(W, H) * .8);
+      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.45)"); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+      const top = ctx.createLinearGradient(0, 0, 0, H * .3); top.addColorStop(0, "rgba(6,8,12,.55)"); top.addColorStop(1, "rgba(6,8,12,0)");
+      ctx.fillStyle = top; ctx.fillRect(0, 0, W, H * .3);
     }
   };
-  if (still) { frame(0); addEventListener("resize", () => frame(0)); return }
-  let last = 0;
-  const loop = now => { if (!document.hidden && now - last > 28) { last = now; frame(now) } requestAnimationFrame(loop) };
+  if (still) { frame(performance.now()); addEventListener("resize", () => frame(performance.now())); S.redrawRoad = () => frame(performance.now()); return }
+  let lastDraw = 0;
+  const loop = now => { if (!document.hidden && now - lastDraw > 28) { lastDraw = now; frame(now) } else last = now; requestAnimationFrame(loop) };
   requestAnimationFrame(loop);
+}
+function setScenery(on) {
+  sceneryOn = on;
+  try { localStorage.setItem("tcm-scenery", on ? "on" : "off") } catch (e) {}
+  const b = $("#scenery"); if (b) { b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); b.dataset.tip = on ? "Scenery on · click for a plain road" : "Scenery off · click for fall scenery" }
+  S.redrawRoad?.();
 }
 
 // ---------------------------------------------------------------- boot

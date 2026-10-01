@@ -3,7 +3,7 @@
    ETS2 blue / ATS red as the two "rigs". Display type is Bahnschrift (DIN, road-sign lettering) condensed. */
 :root {
   --bg0: #06080c; --bg1: #0b0f15; --bg2: #111720;
-  --glass: rgba(20, 26, 35, .72); --glass-hi: rgba(30, 38, 50, .78); --glass-lo: rgba(14, 18, 25, .6);
+  --glass: rgba(18, 23, 31, .84); --glass-hi: rgba(30, 38, 50, .78); --glass-lo: rgba(14, 18, 25, .6);
   --line: rgba(255, 255, 255, .07); --line-hi: rgba(255, 255, 255, .13);
   --text: #e9eef3; --muted: #8e9aa7; --faint: #58636f;
   --amber: #ffb020; --amber-hi: #ffc454; --amber-glow: rgba(255, 176, 32, .35); --amber-soft: rgba(255, 176, 32, .12);
@@ -38,7 +38,7 @@ button { font: inherit; color: inherit }
     radial-gradient(900px 500px at 10% 110%, rgba(61,139,255,.10), transparent 60%),
     radial-gradient(700px 400px at 95% 100%, rgba(255,81,71,.07), transparent 60%),
     linear-gradient(180deg, var(--bg1), var(--bg0)); }
-.roadcv { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 58vh; display: block }
+.roadcv { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
 .grain { position: absolute; inset: 0; opacity: .04; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>") }
 
 /* ---------- shell ---------- */
@@ -54,6 +54,10 @@ button { font: inherit; color: inherit }
 .nav.on::before { content: ""; position: absolute; left: -12px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--amber); box-shadow: 0 0 14px var(--amber) }
 .nav:focus-visible, .btn:focus-visible, .seg button:focus-visible, .chip-btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px }
 .rail-foot { margin-top: auto; display: grid; gap: 10px; justify-items: center }
+.scenery-btn { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: var(--faint); cursor: pointer; display: grid; place-items: center; transition: color .2s, background .2s, border-color .2s; margin-bottom: 6px }
+.scenery-btn svg { width: 18px; height: 18px } .scenery-btn:hover { color: var(--text); background: rgba(255,255,255,.05) }
+.scenery-btn.on { color: var(--amber); border-color: rgba(255,176,32,.35); background: var(--amber-soft) }
+.scenery-btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px }
 .lamp { display: grid; justify-items: center; gap: 4px; font: 700 10px/1 var(--display); letter-spacing: .08em; color: var(--faint) }
 .lamp i { width: 9px; height: 9px; border-radius: 50%; background: #2a323c; box-shadow: inset 0 1px 2px rgba(0,0,0,.6) }
 .lamp.on i { background: var(--ok); box-shadow: 0 0 10px var(--ok) }
@@ -69,7 +73,7 @@ button { font: inherit; color: inherit }
 @keyframes viewIn { from { opacity: 0; transform: translateY(10px) } }
 
 /* ---------- primitives ---------- */
-.panel { background: var(--glass); border: 1px solid var(--line); border-radius: var(--r); backdrop-filter: blur(16px) saturate(1.2); box-shadow: 0 20px 50px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04) }
+.panel { background: var(--glass); border: 1px solid var(--line); border-radius: var(--r); backdrop-filter: blur(22px) saturate(1.1); box-shadow: 0 20px 50px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04) }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 15px; border-radius: 10px; border: 1px solid var(--line-hi); background: rgba(255,255,255,.05); cursor: pointer; font-weight: 600; font-size: 13px; white-space: nowrap; transition: transform .15s var(--ease), background .2s, border-color .2s, box-shadow .2s }
 .btn svg { width: 16px; height: 16px }
 .btn:hover { background: rgba(255,255,255,.09); border-color: rgba(255,255,255,.2) }
@@ -239,7 +243,7 @@ button { font: inherit; color: inherit }
 .toggle::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #cfd6dd; transition: transform .3s var(--ease), background .25s }
 .toggle.on { background: var(--amber) } .toggle.on::after { transform: translateX(16px); background: #1b1302 }
 .filters { display: flex; gap: 6px; flex-wrap: wrap }
-.chip-btn { border: 1px solid var(--line-hi); background: transparent; color: var(--muted); padding: 6px 12px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 12px }
+.chip-btn { border: 1px solid var(--line-hi); background: rgba(12,16,22,.74); backdrop-filter: blur(10px); color: var(--muted); padding: 6px 12px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 12px }
 .chip-btn.on { color: var(--text); background: rgba(255,255,255,.08) }
 
 /* ---------- logbook ---------- */
@@ -332,3 +336,6 @@ button { font: inherit; color: inherit }
 .drift .was { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(255,81,71,.5) } .drift .now { color: var(--text); font-weight: 600 }
 .drift .arr { color: var(--amber) }
 .modal .acts { flex-wrap: wrap }
+
+/* text that sits straight on the scenery gets a soft shadow so it stays readable over bright trees and sky */
+.top .sub, .studio-legend, .acked-toggle, .pt-head .disp { text-shadow: 0 1px 8px rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.6) }
