@@ -38,16 +38,7 @@ button { font: inherit; color: inherit }
     radial-gradient(900px 500px at 10% 110%, rgba(61,139,255,.10), transparent 60%),
     radial-gradient(700px 400px at 95% 100%, rgba(255,81,71,.07), transparent 60%),
     linear-gradient(180deg, var(--bg1), var(--bg0)); }
-.road { position: absolute; left: 50%; bottom: -2px; width: 220vmax; height: 46vh; transform: translateX(-50%) perspective(420px) rotateX(64deg); transform-origin: 50% 100%;
-  /* static paint: asphalt band with solid white edge lines; only the centre dashes move */
-  background: linear-gradient(90deg, transparent 43%, rgba(255,255,255,.10) 43% 43.25%, rgba(255,255,255,.018) 43.25% 56.75%,
-                              rgba(255,255,255,.10) 56.75% 57%, transparent 57%);
-  -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 85%); mask-image: linear-gradient(to top, #000 0%, transparent 85%) }
-/* centre dashes: one 6px-wide column, stepping straight down the road (toward the driver) - x never changes */
-.road::after { content: ""; position: absolute; top: 0; bottom: 0; left: calc(50% - 3px); width: 6px;
-  background: linear-gradient(to bottom, rgba(255,176,32,.34) 0 50%, transparent 50% 100%) 0 0 / 6px 88px repeat-y;
-  animation: drive 1.1s linear infinite }
-@keyframes drive { from { background-position: 0 0 } to { background-position: 0 88px } }
+.roadcv { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 58vh; display: block }
 .grain { position: absolute; inset: 0; opacity: .04; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>") }
 
 /* ---------- shell ---------- */
@@ -283,8 +274,8 @@ button { font: inherit; color: inherit }
 .pill.culprit { background: var(--crit-soft); color: var(--crit); border-color: rgba(255,81,71,.5); box-shadow: 0 0 18px rgba(255,81,71,.3) }
 
 /* ---------- dock, toasts, modal ---------- */
-.dock { position: fixed; left: 50%; bottom: 22px; z-index: 20; transform: translate(-50%, 140%); transition: transform .5s var(--ease); display: flex; align-items: center; gap: 14px; padding: 10px 10px 10px 18px; border-radius: 16px; background: rgba(18,23,31,.9); border: 1px solid rgba(255,176,32,.4); box-shadow: 0 20px 50px rgba(0,0,0,.55), 0 0 30px rgba(255,176,32,.12); backdrop-filter: blur(20px) }
-.dock.show { transform: translate(-50%, 0) }
+.dock { position: fixed; left: 50%; bottom: 22px; z-index: 20; transform: translate(-50%, calc(100% + 40px)); visibility: hidden; transition: transform .5s var(--ease); display: flex; align-items: center; gap: 14px; padding: 10px 10px 10px 18px; border-radius: 16px; background: rgba(18,23,31,.9); border: 1px solid rgba(255,176,32,.4); box-shadow: 0 20px 50px rgba(0,0,0,.55), 0 0 30px rgba(255,176,32,.12); backdrop-filter: blur(20px) }
+.dock.show { transform: translate(-50%, 0); visibility: visible }
 .dock .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 0 var(--amber-glow); animation: pulse 1.6s infinite }
 @keyframes pulse { 70% { box-shadow: 0 0 0 10px transparent } }
 .toasts { position: fixed; right: 22px; top: 20px; z-index: 60; display: grid; gap: 10px; width: min(380px, 90vw) }

@@ -639,8 +639,56 @@ function paintFinder(g) {
   };
 }
 
+// ---------------------------------------------------------------- backdrop road
+// True perspective, not a tilted CSS plane: screen y = horizon + depthScale / z, and the road's half-width
+// shrinks with the same factor, so every dash slides straight down the centre line toward the driver.
+function startRoad() {
+  const cv = $("#road"), ctx = cv.getContext("2d");
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const NEAR = 12, FAR = 400, PERIOD = 10, DASH = 3.6, SPEED = 26;  // metres-ish: bottom edge is 12 m ahead
+  let W = 0, H = 0, dpr = 1;
+  const size = () => {
+    dpr = Math.min(devicePixelRatio || 1, 2); W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  size(); addEventListener("resize", size);
+  const frame = now => {
+    const hy = H * 0.08, cx = 88 + (W - 88) / 2, half = Math.min(W * 0.34, 620), span = H - hy;
+    const y = z => hy + span * (NEAR / z);                 // depth -> screen row
+    const k = z => NEAR / z;                               // depth -> scale (1 at the bottom edge)
+    ctx.clearRect(0, 0, W, H);
+    // asphalt
+    const asphalt = ctx.createLinearGradient(0, hy, 0, H);
+    asphalt.addColorStop(0, "rgba(255,255,255,0)"); asphalt.addColorStop(1, "rgba(255,255,255,.035)");
+    ctx.fillStyle = asphalt;
+    ctx.beginPath(); ctx.moveTo(cx, hy); ctx.lineTo(cx + half, H); ctx.lineTo(cx - half, H); ctx.closePath(); ctx.fill();
+    // solid white edge lines, converging on the vanishing point
+    for (const s of [-1, 1]) {
+      const g = ctx.createLinearGradient(0, hy, 0, H);
+      g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(255,255,255,.22)");
+      ctx.fillStyle = g; ctx.beginPath();
+      ctx.moveTo(cx + s * 0.5, hy); ctx.lineTo(cx + s * (half + 3), H); ctx.lineTo(cx + s * (half - 3), H); ctx.closePath(); ctx.fill();
+    }
+    // amber centre dashes moving toward the driver
+    const offset = still ? 0 : ((now / 1000) * SPEED) % PERIOD;
+    for (let z0 = NEAR - offset; z0 < FAR; z0 += PERIOD) {
+      const a = Math.max(z0, NEAR), b = z0 + DASH;
+      if (b <= NEAR) continue;
+      const ya = y(a), yb = y(b), wa = 5 * k(a), wb = 5 * k(b);
+      const alpha = Math.min(1, (ya - hy) / span * 3.2) * 0.42;
+      ctx.fillStyle = `rgba(255,176,32,${alpha.toFixed(3)})`;
+      ctx.beginPath(); ctx.moveTo(cx - wa, ya); ctx.lineTo(cx + wa, ya); ctx.lineTo(cx + wb, yb); ctx.lineTo(cx - wb, yb); ctx.closePath(); ctx.fill();
+    }
+  };
+  if (still) { frame(0); addEventListener("resize", () => frame(0)); return }
+  let last = 0;
+  const loop = now => { if (!document.hidden && now - last > 28) { last = now; frame(now) } requestAnimationFrame(loop) };
+  requestAnimationFrame(loop);
+}
+
 // ---------------------------------------------------------------- boot
 (async () => {
+  startRoad();
   initShell();
   const games = await api("games");
   S.owned = ["ets2", "ats"].filter(g => games[g].owned);
