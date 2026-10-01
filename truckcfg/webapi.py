@@ -177,7 +177,7 @@ class Api:
                     action={"kind": "view", "view": "logbook", "label": "Continue"})
             if not rs["installed"]:
                 add(id="reshade", fp="missing", sev="info", title="ReShade isn't installed",
-                    detail="Optional. Sharpening and colour presets live in Twin Rigs → ReShade.",
+                    detail="Optional. Sharpening and colour presets live in ATS/ETS2 Sync → ReShade.",
                     action={"kind": "view", "view": "twin", "label": "Open"} if len(owned()) > 1 else None)
             acks = _acks().get(k, {})
             for c in checks:
@@ -241,7 +241,7 @@ class Api:
             return f"{int(d.total_seconds() // 3600)} h ago"
         return f"{d.days} day(s) ago"
 
-    # ---------- twin rigs ----------
+    # ---------- ats/ets2 sync ----------
     def twin(self) -> dict:
         if len(owned()) < 2:
             return {"available": False, "have": owned()}

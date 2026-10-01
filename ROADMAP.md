@@ -12,5 +12,5 @@ Nothing open right now.
 *Logged 2026-09-30, done 2026-10-01 in the web UI.*
 
 The tkinter Compare page had four buttons for one action (copy selected / sync all, in each direction). The web UI's
-**Twin Rigs** page replaces it with a direction switch that defaults to the more recently changed game, one
+**ATS/ETS2 Sync** page (first called Twin Rigs) replaces it with a direction switch that defaults to the more recently changed game, one
 relabelling Sync button, and a confirmation that names the game being overwritten. The tkinter page is left unchanged.

@@ -122,7 +122,7 @@ function hookImages(root) { $$("[data-pkg][data-game].lazy", root).forEach(el =>
 // ---------------------------------------------------------------- shell
 const VIEWS = {
   pretrip: { label: "Inspection", icon: I.gauge, sub: "A walk-around of your setup before you drive." },
-  twin: { label: "Twin Rigs", icon: I.twin, sub: "Keep ETS2 and ATS feeling the same: controls, graphics, ReShade and mods." },
+  twin: { label: "ATS/ETS2 Sync", icon: I.twin, sub: "Keep ETS2 and ATS feeling the same: controls, graphics, ReShade and mods." },
   studio: { label: "Studio", icon: I.layers, sub: "Drag to reorder. The mod at the top wins when two mods change the same file." },
   garage: { label: "Garage", icon: I.grid, sub: "Your mods, and named loadouts you can switch between in one click." },
   logbook: { label: "Logbook", icon: I.clock, sub: "Everything that happened to your setup, with a restore point at each step." },
@@ -240,7 +240,7 @@ async function renderPretrip(rescan = false) {
     }).join("")}</div>
     ${S.owned.length === 1 ? `<div class="panel" style="margin-top:18px;padding:14px 18px;display:flex;gap:12px;align-items:center;color:var(--muted);font-size:13px">
       <span style="color:var(--faint)">${I.twin.replace("<svg", '<svg width="22" height="22"')}</span>
-      <div>Only <b style="color:var(--text)">${GAME[S.owned[0]].title}</b> is on this PC. If you add ${GAME[other(S.owned[0])].title} later, <b style="color:var(--text)">Twin Rigs</b> appears so you can keep both games' controls, graphics and ReShade in step.</div></div>` : ""}`;
+      <div>Only <b style="color:var(--text)">${GAME[S.owned[0]].title}</b> is on this PC. If you add ${GAME[other(S.owned[0])].title} later, <b style="color:var(--text)">ATS/ETS2 Sync</b> appears so you can keep both games' controls, graphics and ReShade in step.</div></div>` : ""}`;
   requestAnimationFrame(() => requestAnimationFrame(() => {
     $$(".gauge .val", v).forEach(p => p.style.strokeDashoffset = p.dataset.to);
     $$(".gauge .needle", v).forEach(n => n.style.transform = `rotate(${n.dataset.rot}deg)`);
@@ -321,7 +321,7 @@ async function renderTwin() {
   const v = $("#view");
   if (!S.data.twin) { v.innerHTML = skeleton(1, 420); S.data.twin = await api("twin"); if (S.view !== "twin") return }
   const t = S.data.twin;
-  if (!t.available) { v.innerHTML = `<div class="panel insync"><div class="seal" style="color:var(--faint);background:none">${I.twin}</div><div class="disp" style="font-size:24px">Twin Rigs needs both games</div><div style="color:var(--muted)">Install Euro Truck Simulator 2 and American Truck Simulator to compare and sync them.</div></div>`; return }
+  if (!t.available) { v.innerHTML = `<div class="panel insync"><div class="seal" style="color:var(--faint);background:none">${I.twin}</div><div class="disp" style="font-size:24px">ATS/ETS2 Sync needs both games</div><div style="color:var(--muted)">Install Euro Truck Simulator 2 and American Truck Simulator to compare and sync them.</div></div>`; return }
   if (!S.dir) { const c = t.changed; S.dir = c.ats && c.ets2 && c.ets2 > c.ats ? "ets2" : "ats" }
   const src = S.dir, dst = other(src);
   const counts = {

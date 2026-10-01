@@ -7,7 +7,7 @@ two games in step, manages mod load order, and keeps a restorable history of eve
 - **Inspection** – health check with clickable gauges (mods current for the installed version, file overlaps
   between active mods, bindings changed since the last snapshot, days since the last crash) and a list of
   alerts. Every alert has one clear next step, and can be acknowledged; it comes back if anything changes.
-- **Twin Rigs** – ETS2 and ATS side by side: controls, graphics settings (`config.cfg`), ReShade files and
+- **ATS/ETS2 Sync** – ETS2 and ATS side by side: controls, graphics settings (`config.cfg`), ReShade files and
   preset, and matching mods. One direction switch and one Sync button. Hidden on PCs with one game.
 - **Studio** – drag-and-drop load order in colored group lanes, live ▲/▼ badges for files a mod wins or
   loses to another, author notes, and an auto-sort that follows each mod author's own instructions.
