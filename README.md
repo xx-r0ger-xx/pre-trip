@@ -4,6 +4,8 @@ The walk-around before you drive, for Euro Truck Simulator 2 and American Truck 
 (Python back end, HTML front end in a native window via pywebview + WebView2) that checks your setup, keeps the
 two games in step, manages mod load order, and keeps a restorable history of every change.
 
+![Pre-Trip Inspection screen: gauges and alerts for ETS2 and ATS over a fall road scene](docs/screenshots/inspection.png)
+
 - **Inspection** – health check with clickable gauges (mods current for the installed version, file overlaps
   between active mods, bindings changed since the last snapshot, days since the last crash) and a list of
   alerts. Every alert has one clear next step, and can be acknowledged; it comes back if anything changes.
@@ -20,6 +22,16 @@ two games in step, manages mod load order, and keeps a restorable history of eve
   per round to find the one crashing the game.
 - **Cleanup** – profile health, and the conflict copies cloud sync apps leave in game folders
   (`controls - Copy.sii`, `(# Name clash …)`), moved to a quarantine folder with a manifest. Nothing is deleted.
+
+## Screenshots
+
+| Studio: load order, author notes, file overlaps | ATS/ETS2 Sync: graphics side by side |
+|---|---|
+| ![Studio](docs/screenshots/studio.png) | ![ATS/ETS2 Sync](docs/screenshots/sync.png) |
+| **Garage: your mods and loadouts** | **Logbook: history, restore points, crash help** |
+| ![Garage](docs/screenshots/garage.png) | ![Logbook](docs/screenshots/logbook.png) |
+| **Install mods: Workshop link, Downloads, drag and drop** | |
+| ![Install mods](docs/screenshots/install.png) | |
 
 Every write refuses to run while the target game is open (the game rewrites its files on exit) and backs up
 what it replaces first, so every change can be undone from the Logbook.
@@ -43,7 +55,7 @@ pythonw webapp.pyw        # run
 python build.py           # build dist\Pre-Trip.exe
 ```
 
-Set `TCM_GAMES=ets2` (or `ats`) to preview the one-game experience on a PC that has both. `PRETRIP_TEST=1` opens the window off-screen under a different title, for automated checks.
+Set `PRETRIP_GAMES=ets2` (or `ats`) to preview the one-game experience on a PC that has both. `PRETRIP_TEST=1` opens the window off-screen under a different title, for automated checks.
 
 Tests: `python -m unittest discover -s tests`
 

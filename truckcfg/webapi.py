@@ -29,9 +29,9 @@ def _profile(game: core.Game) -> core.Profile | None:
 
 
 def owned() -> list[str]:
-    """Games this PC has: installed in a Steam library, or with a profile in Documents. TCM_GAMES=ats (comma list)
+    """Games this PC has: installed in a Steam library, or with a profile in Documents. PRETRIP_GAMES=ats (comma list)
     narrows it, which is how the one-game experience is tested on a PC that has both."""
-    only = [k.strip() for k in os.environ.get("TCM_GAMES", "").split(",") if k.strip()]
+    only = [k.strip() for k in os.environ.get("PRETRIP_GAMES", "").split(",") if k.strip()]
     return [k for k, g in GAMES.items()
             if (not only or k in only) and (graphics.install_dir(g) is not None or _profile(g) is not None)]
 
