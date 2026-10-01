@@ -2,16 +2,15 @@
 
 Ideas and improvements that aren't built yet. Newest first.
 
-## Compare page: one direction switch + one action button
-*Logged 2026-09-30.*
+The web UI (`webapp.pyw`) is the main app. The tkinter app (`app.pyw`) is kept as is and isn't getting new features.
 
-The Compare page has four buttons for what is really one action: Copy selected to ATS, Copy selected to ETS2,
-Sync all ETS2 → ATS, and Sync all ATS → ETS2. It feels clunky.
+Nothing open right now.
 
-Replace them with:
-- a segmented direction switch, `ATS → ETS2 | ETS2 → ATS`, defaulting to the game whose `controls.sii` changed
-  most recently (the one marked NEWER today);
-- a single action button that relabels itself: "Sync all N differences" with no selection, "Copy N selected"
-  with rows selected.
+## Done
 
-Keep the confirmation dialog, and make it name the game being overwritten so the direction can't be missed.
+### Compare page: one direction switch + one action button
+*Logged 2026-09-30, done 2026-10-01 in the web UI.*
+
+The tkinter Compare page had four buttons for one action (copy selected / sync all, in each direction). The web UI's
+**Twin Rigs** page replaces it with a direction switch that defaults to the more recently changed game, one
+relabelling Sync button, and a confirmation that names the game being overwritten. The tkinter page is left unchanged.
