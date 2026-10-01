@@ -160,7 +160,7 @@ class Api:
             for a, o in pairs[:3]:
                 add(id=f"overlap:{a}:{o['other']}", fp=str(o["count"]), sev="info",
                     title=f"{self._name(by, a)} overrides {o['count']} files of {self._name(by, o['other'])}",
-                    detail="Normal for add-ons. Only change it if the mod you want isn't winning.",
+                    detail="Normal for add-ons. Only change it if the mod you want isn't working.",
                     action={"kind": "mod", "package": a, "label": "See files"})
             if drift:
                 add(id="drift", fp=_fp([snaps[0].path.name] + [f"{r.name}={r.right}" for r in drift_rows if r.mapped]),
