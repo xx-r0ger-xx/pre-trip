@@ -101,16 +101,79 @@ function confirmBox({ title, body, target, list, ok = "Confirm", danger = false 
     setTimeout(() => $('[data-a="yes"]', box).focus(), 50);
   });
 }
+// One-line help for every control whose label doesn't say it all. Elements with their own data-tip (gauges, badges,
+// timeline pins) keep theirs; everything else is matched here by selector. Kept in one place so the wording is easy to edit.
+const TIPS = [
+  ['.nav[data-view="pretrip"]', "Health check for your games: mods, file overlaps, bindings and crashes"],
+  ['.nav[data-view="twin"]', "Compare ETS2 and ATS, and copy controls, graphics or ReShade from one to the other"],
+  ['.nav[data-view="studio"]', "Set your mod load order. Drag to reorder; the mod at the top wins"],
+  ['.nav[data-view="garage"]', "Browse your mods and switch between saved loadouts"],
+  ['.nav[data-view="logbook"]', "Every change to your setup, with restore points and crash help"],
+  ['.nav[data-view="cleanup"]', "Profile health, and leftover copies from cloud sync apps"],
+  ["#lamp-ets2", "Lights up while Euro Truck Simulator 2 is running"],
+  ["#lamp-ats", "Lights up while American Truck Simulator is running"],
+  ["#refresh", "Reload mods, profiles and settings from disk"],
+  ["#installbtn", "Add mods from a Workshop link, your Downloads folder, or files you drop in"],
+  ["#rescan", "Check everything again now"],
+  ["[data-launch]", "Start the game through Steam"],
+  ["[data-unack]", "Bring this alert back"],
+  [".acked-toggle", "Alerts you've acknowledged. They come back if anything changes"],
+  ["#dirseg", "Which game to copy from. The other one gets overwritten"],
+  ["#twin-go", "Copy the differences into the other game. Its current version is backed up first"],
+  ["#showsame", "Also list settings that already match"],
+  ['.tab[data-tab="controls"]', "Key and controller bindings that differ"],
+  ['.tab[data-tab="graphics"]', "Graphics settings from each game's config.cfg"],
+  ['.tab[data-tab="reshade"]', "ReShade files and preset values"],
+  ['.tab[data-tab="mods"]', "Mods with the same name in both games"],
+  [".twin-grid .cb", "Select to copy only the ones you pick"],
+  ["#autosort", "Sort by mod type and each author's load-order notes. Review, then save"],
+  [".item .grip", "Drag to reorder"],
+  ['[data-act="up"]', "Move up (Alt + ↑)"],
+  ['[data-act="down"]', "Move down (Alt + ↓)"],
+  ['[data-act="off"]', "Turn off: moves it to the library"],
+  ['[data-act="on"]', "Turn on: adds it to the top of the load order"],
+  ["#save", "Write this load order to the game's profile. A backup is saved first"],
+  ["#discard", "Throw away changes you haven't saved"],
+  ["#dtoggle", "Turn this mod on or off. Takes effect when you save"],
+  ["#dfolder", "Open the game's mod folder"],
+  ["#dremove", "Local mods go to the Recycle Bin; Workshop mods are unsubscribed"],
+  ["#losave", "Save your current active mods as a named loadout"],
+  ["[data-lo]", "Preview what switching to this loadout changes"],
+  ["#loapply", "Switch the game's active mods to this loadout. A backup is saved first"],
+  ["#lodel", "Delete this saved loadout. Your mods aren't touched"],
+  ["[data-tg]", "Turn this mod on or off. Takes effect when you save"],
+  ["[data-restore]", "Put things back the way they were at this point. The current version is backed up first"],
+  ["#snap", "Save a restore point of this game's bindings"],
+  ["#crash-ack", "Stop flagging this crash in Inspection"],
+  ["#bstart", "Find a crashing mod by switching half your mods off each round"],
+  ['[data-b="1"]', "The game crashed with this set of mods on"],
+  ['[data-b="0"]', "The game ran fine with this set of mods on"],
+  ['[data-b="stop"]', "End the crash finder and put your load order back"],
+  ["#qgo", "Move the selected files out of the game folder. Nothing is deleted"],
+  ["#qopen", "Open the folder where quarantined files are kept"],
+  ["#wlook", "Check the Workshop item and which game it's for"],
+  ["#wsub", "Subscribe through Steam. It downloads in the background"],
+  ["#ibrowse", "Pick mod files from anywhere on your PC"],
+  ["#igo", "Copy the selected files into the game's mod folder"],
+  ["[data-ovi]", "Open this mod to see which files it wins and loses"],
+];
 const tip = $("#tip");
+let tipTimer = null, tipFor = null;
+const tipText = el => { const own = el.closest("[data-tip]"); if (own) return [own, own.dataset.tip];
+  for (const [sel, text] of TIPS) { const m = el.closest(sel); if (m) return [m, esc(text)] } return [null, ""] };
 document.addEventListener("mouseover", e => {
-  const t = e.target.closest("[data-tip]"); if (!t) { tip.style.opacity = 0; return }
-  tip.innerHTML = t.dataset.tip; tip.style.opacity = 1;
+  const [target, text] = tipText(e.target);
+  if (target === tipFor) return;
+  tipFor = target; clearTimeout(tipTimer); tip.style.opacity = 0;
+  if (target) tipTimer = setTimeout(() => { tip.innerHTML = text; placeTip(); tip.style.opacity = 1 }, 450);  // only when you pause on it
 });
-document.addEventListener("mousemove", e => {
-  if (tip.style.opacity === "0") return;
-  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 10), y = Math.min(e.clientY + 16, innerHeight - tip.offsetHeight - 10);
-  tip.style.left = x + "px"; tip.style.top = y + "px";
-});
+document.addEventListener("mousedown", () => { clearTimeout(tipTimer); tip.style.opacity = 0 });
+let mouseX = 0, mouseY = 0;
+const placeTip = () => {
+  tip.style.left = Math.min(mouseX + 14, innerWidth - tip.offsetWidth - 10) + "px";
+  tip.style.top = Math.min(mouseY + 16, innerHeight - tip.offsetHeight - 10) + "px";
+};
+document.addEventListener("mousemove", e => { mouseX = e.clientX; mouseY = e.clientY; if (tip.style.opacity !== "0") placeTip() });
 
 // ---------------------------------------------------------------- images
 const imgObs = new IntersectionObserver(ents => ents.forEach(en => { if (en.isIntersecting) { imgObs.unobserve(en.target); loadImg(en.target) } }), { rootMargin: "200px" });
@@ -152,7 +215,7 @@ function usesGame(v) { return ["studio", "garage", "logbook", "cleanup"].include
 function topBar() {
   const acts = $("#top-actions"); acts.innerHTML = "";
   if (S.view === "garage" || S.view === "studio") {
-    const ib = document.createElement("button"); ib.className = "btn primary"; ib.innerHTML = `${I.plus}Install mods`; ib.onclick = () => openInstall(S.game);
+    const ib = document.createElement("button"); ib.className = "btn primary"; ib.id = "installbtn"; ib.innerHTML = `${I.plus}Install mods`; ib.onclick = () => openInstall(S.game);
     acts.append(ib);
   }
   if (usesGame(S.view) && S.owned.length === 1) {
@@ -164,7 +227,7 @@ function topBar() {
     seg.onclick = e => { const g = e.target.closest("[data-g]")?.dataset.g; if (g && g !== S.game) { S.game = g; persist(); render() } };
     acts.append(seg);
   }
-  const rf = document.createElement("button"); rf.className = "btn ghost"; rf.innerHTML = `${I.refresh}Refresh`; rf.onclick = () => refresh();
+  const rf = document.createElement("button"); rf.className = "btn ghost"; rf.id = "refresh"; rf.innerHTML = `${I.refresh}Refresh`; rf.onclick = () => refresh();
   acts.append(rf);
 }
 function go(v) { closeDrawer(); S.view = v; persist(); render(); $("#scroll").scrollTop = 0 }
