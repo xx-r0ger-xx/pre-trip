@@ -1,6 +1,6 @@
 """Subscribe to / unsubscribe from Steam Workshop items using the game's own steam_api64.dll.
 
-Runs in a short-lived child process (python -m truckcfg.steamugc <sub|unsub> <appid> <dll dir> <ids...>) because SteamAPI_Init
+Runs in a short-lived child process (python -m truckcfg.steamugc, or Pre-Trip.exe --steamugc) because SteamAPI_Init
 ties the whole process to the game's app id - Steam briefly shows the game as running while it works.
 """
 from __future__ import annotations
@@ -35,24 +35,47 @@ def subscribe(game, workshop_ids: list[str]) -> None:
     _run(game, "sub", workshop_ids)
 
 
+def child_command(args: list[str]) -> list[str]:
+    """How to start the helper: the packaged Pre-Trip.exe runs itself with --steamugc; from source it's python -m."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--steamugc", *args]
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        exe = exe.with_name("python.exe")
+    return [str(exe), "-m", "truckcfg.steamugc", *args]
+
+
 def _run(game, action: str, workshop_ids: list[str]) -> None:
+    import tempfile
     from truckcfg import core, mods
     if core.is_running(game):
         raise RuntimeError(f"Close {game.title} first.")
     dll = steam_dll(game.exe)
     if not dll:
         raise RuntimeError(f"Couldn't find {game.title}'s steam_api64.dll.")
-    exe = Path(sys.executable)
-    if exe.name.lower() == "pythonw.exe":  # need stdout from the child
-        exe = exe.with_name("python.exe")
-    root = Path(__file__).resolve().parent.parent
-    r = subprocess.run([str(exe), "-m", "truckcfg.steamugc", action, mods.STEAM_APP[game.key], str(dll.parent),
-                        *workshop_ids], cwd=root, capture_output=True, text=True, timeout=60,
-                       creationflags=subprocess.CREATE_NO_WINDOW)
-    result = [ln for ln in r.stdout.splitlines() if ln.startswith(("OK", "FAIL"))]
-    if r.returncode or not result or result[-1] != "OK":
-        why = (result[-1][5:] if result and result[-1].startswith("FAIL") else r.stderr.strip()[-300:]) or "unknown error"
+    fd, out = tempfile.mkstemp(prefix="pretrip-steam-", suffix=".txt")
+    os.close(fd)
+    try:
+        root = Path(__file__).resolve().parent.parent
+        r = subprocess.run(child_command([out, action, mods.STEAM_APP[game.key], str(dll.parent), *workshop_ids]),
+                           cwd=root, capture_output=True, text=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+        result = Path(out).read_text(encoding="utf-8").strip()
+    finally:
+        Path(out).unlink(missing_ok=True)
+    if r.returncode or result != "OK":
+        why = (result[5:] if result.startswith("FAIL") else (r.stderr or "").strip()[-300:]) or "unknown error"
         raise RuntimeError(f"Steam didn't {'subscribe' if action == 'sub' else 'unsubscribe'}: {why}")
+
+
+def main(argv: list[str]) -> int:
+    """Child entry point: <result file> <sub|unsub> <appid> <dll dir> <ids...>. Writes OK or FAIL <reason>."""
+    out, action, appid, dll_dir, *ids = argv
+    try:
+        msg = _child(action, appid, dll_dir, [int(x) for x in ids])
+    except Exception as e:  # noqa: BLE001 - report anything back to the app instead of dying silently
+        msg = f"FAIL {e}"
+    Path(out).write_text(msg, encoding="utf-8")
+    return 0
 
 
 def _child(action: str, appid: str, dll_dir: str, ids: list[int]) -> str:
@@ -88,4 +111,4 @@ def _child(action: str, appid: str, dll_dir: str, ids: list[int]) -> str:
 
 
 if __name__ == "__main__":
-    print(_child(sys.argv[1], sys.argv[2], sys.argv[3], [int(x) for x in sys.argv[4:]]), flush=True)
+    sys.exit(main(sys.argv[1:]))

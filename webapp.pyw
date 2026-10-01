@@ -1,12 +1,14 @@
 """Pre-Trip - setup manager for Euro Truck Simulator 2 and American Truck Simulator (pywebview + HTML front end)."""
 import ctypes
 import json
+import os
 import sys
 from ctypes import wintypes
 from pathlib import Path
 
 import webview
 
+HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))  # the exe unpacks its files to _MEIPASS
 sys.path.insert(0, str(Path(__file__).parent))
 from truckcfg.webapi import Api  # noqa: E402
 
@@ -38,9 +40,14 @@ def enable_file_drop(window):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--steamugc"]:  # the packaged exe doubles as the Steam Workshop helper
+        from truckcfg import steamugc
+        sys.exit(steamugc.main(sys.argv[2:]))
     width, height = initial_size()
-    window = webview.create_window("Pre-Trip", str(Path(__file__).parent / "web" / "index.html"),
+    test = os.environ.get("PRETRIP_TEST") == "1"  # automated checks: off-screen, distinct title, never steals focus
+    window = webview.create_window("Pre-Trip (test)" if test else "Pre-Trip", str(HERE / "web" / "index.html"),
                                    js_api=Api(), width=width, height=height, min_size=(900, 600),
-                                   background_color="#06080c")
+                                   background_color="#06080c", x=-4000 if test else None, y=0 if test else None,
+                                   focus=not test)
     window.events.loaded += lambda: enable_file_drop(window)
     webview.start(debug="--debug" in sys.argv)

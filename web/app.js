@@ -1032,6 +1032,7 @@ function setScenery(on) {
   startRoad();
   initShell();
   const games = await api("games");
+  api("version").then(v => { $("#logo").dataset.tip = `<b>Pre-Trip</b> v${esc(v)}`; $("#version").textContent = "v" + v });
   S.owned = ["ets2", "ats"].filter(g => games[g].owned);
   if (!S.owned.length) {
     $(".main").innerHTML = `<div class="empty" style="margin:auto;max-width:520px"><div class="seal" style="color:var(--amber)">${I.wheel}</div>

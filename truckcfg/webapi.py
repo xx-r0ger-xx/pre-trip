@@ -91,6 +91,10 @@ class Api:
         return loadorder.read_order(path)[1] if path else []
 
     # ---------- status ----------
+    def version(self) -> str:
+        from truckcfg import __version__
+        return __version__
+
     def games(self) -> dict:
         have = owned()
         return {k: {"title": g.title, "owned": k in have, "installed": graphics.install_dir(g) is not None,

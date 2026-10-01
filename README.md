@@ -24,14 +24,26 @@ two games in step, manages mod load order, and keeps a restorable history of eve
 Every write refuses to run while the target game is open (the game rewrites its files on exit) and backs up
 what it replaces first, so every change can be undone from the Logbook.
 
-## Run
+## Download and run
+
+1. Download **Pre-Trip.exe** from the [latest release](../../releases/latest). No installer and no Python needed.
+2. Run it. Windows 10 and 11 already include the WebView2 runtime it uses.
+3. The first time, Windows SmartScreen may say *"Windows protected your PC"*, because the exe isn't code-signed
+   (signing certificates cost money and Pre-Trip is free). Click **More info → Run anyway**. Some antivirus tools
+   are wary of packaged Python apps for the same reason; the full source is here if you'd rather build it yourself.
+
+Close the game before saving changes in Pre-Trip: the games rewrite their files when they exit, and Pre-Trip refuses
+to write while a game is running.
+
+## Run from source / build the exe
 
 ```
-pip install pywebview
-pythonw webapp.pyw
+pip install -r requirements.txt
+pythonw webapp.pyw        # run
+python build.py           # build dist\Pre-Trip.exe
 ```
 
-Set `TCM_GAMES=ets2` (or `ats`) to preview the one-game experience on a PC that has both.
+Set `TCM_GAMES=ets2` (or `ats`) to preview the one-game experience on a PC that has both. `PRETRIP_TEST=1` opens the window off-screen under a different title, for automated checks.
 
 Tests: `python -m unittest discover -s tests`
 
