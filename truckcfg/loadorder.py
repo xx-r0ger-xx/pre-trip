@@ -265,8 +265,8 @@ def recommended_order(order: list[Entry], categories_for, description_for=lambda
 
 
 def backup(path: Path, game: core.Game) -> Path:
-    dest = BACKUPS / game.key / datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    dest.mkdir(parents=True, exist_ok=True)
+    dest = core.unused_path(BACKUPS / game.key / datetime.now().strftime("%Y-%m-%d_%H%M%S"))
+    dest.mkdir(parents=True)
     shutil.copy2(path, dest / path.name)
     return dest
 

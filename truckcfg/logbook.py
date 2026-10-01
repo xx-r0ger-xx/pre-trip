@@ -72,7 +72,7 @@ def restore(game: core.Game, kind: str, ident: str) -> str:
     if kind == "config":
         target = graphics.config_path(game)
         src = target.with_name(ident)
-        shutil.copy2(target, target.with_name(f"config.cfg.bak-{datetime.now():%Y%m%d-%H%M%S}"))
+        shutil.copy2(target, core.unused_path(target.with_name(f"config.cfg.bak-{datetime.now():%Y%m%d-%H%M%S}")))
         shutil.copy2(src, target)
         return "Graphics settings restored. Your current config.cfg was backed up first."
     raise ValueError(f"Unknown restore type {kind!r}")

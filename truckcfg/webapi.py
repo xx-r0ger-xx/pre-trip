@@ -306,6 +306,8 @@ class Api:
         return f"Copied {n} binding(s) {src.upper()} → {dst.upper()}. A snapshot of {dst.upper()} was taken first."
 
     def sync_graphics(self, src: str, dst: str, keys: list | None = None) -> str:
+        if core.is_running(_g(dst)):  # refuse up front, even when there turns out to be nothing to copy
+            raise RuntimeError(f"Close {_g(dst).title} first - it rewrites config.cfg when it exits.")
         cfg = graphics.read_config(_g(src))
         rows = graphics.diff(cfg, graphics.read_config(_g(dst)))
         values = {r["key"]: r["a"] for r in rows if not r["same"] and r["a"] is not None

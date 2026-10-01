@@ -69,6 +69,15 @@ def control_files(folder: Path) -> list[Path]:
     return sorted(p for p in folder.iterdir() if p.is_file() and CONTROL_FILE_RE.match(p.name))
 
 
+def unused_path(path: Path) -> Path:
+    """path, or path_1, path_2... - backups are named by the second, and two in one second must not overwrite each other."""
+    n, cand = 1, path
+    while cand.exists():
+        cand = path.with_name(f"{path.name}_{n}")
+        n += 1
+    return cand
+
+
 def controls_changed(profile: Profile) -> datetime:
     """When the game last saved this profile's controls.sii."""
     return datetime.fromtimestamp((profile.path / "controls.sii").stat().st_mtime)

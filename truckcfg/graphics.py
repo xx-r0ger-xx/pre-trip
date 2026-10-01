@@ -70,7 +70,7 @@ def write_keys(game: core.Game, values: dict[str, str]) -> Path:
         raise RuntimeError(f"Close {game.title} first - it rewrites config.cfg when it exits.")
     p = config_path(game)
     text = core.read_text(p) if p.is_file() else "# prism3d variable config data\n\n"
-    backup = p.with_name(f"config.cfg.bak-{datetime.now():%Y%m%d-%H%M%S}")
+    backup = core.unused_path(p.with_name(f"config.cfg.bak-{datetime.now():%Y%m%d-%H%M%S}"))
     if p.is_file():
         shutil.copy2(p, backup)
     pending = dict(values)
