@@ -36,6 +36,9 @@ two games in step, manages mod load order, and keeps a restorable history of eve
 Every write refuses to run while the target game is open (the game rewrites its files on exit) and backs up
 what it replaces first, so every change can be undone from the Logbook.
 
+Pre-Trip is free and open source (MIT). If it saves you some headaches, you can
+[☕ buy me a coffee](https://buymeacoffee.com/xx.r0ger.xx). Entirely optional, never required.
+
 ## Download and run
 
 1. Download **Pre-Trip.exe** from the [latest release](../../releases/latest). No installer and no Python needed.
@@ -81,3 +84,4 @@ pythonw app.pyw
 - Keep game profiles out of live cloud sync if you can: sync clients racing the game produce
   "Name clash" / conflict copies and can revert bindings.
 - Not affiliated with SCS Software. Euro Truck Simulator 2 and American Truck Simulator are their trademarks.
+- MIT licensed, see [LICENSE](LICENSE).
