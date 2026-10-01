@@ -107,7 +107,7 @@ class Api:
                       "running": core.is_running(g)}
         return out
 
-    # ---------- pre-trip inspection ----------
+    # ---------- inspection ----------
     def inspect(self) -> dict:
         res = {}
         for k in owned():

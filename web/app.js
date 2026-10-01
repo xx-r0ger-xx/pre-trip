@@ -1,5 +1,5 @@
 "use strict";
-/* Truck Config Manager — web UI. Talks to truckcfg/webapi.py through window.pywebview.api. */
+/* Pre-Trip — web UI. Talks to truckcfg/webapi.py through window.pywebview.api. */
 
 // ---------------------------------------------------------------- icons
 const I = {
@@ -121,7 +121,7 @@ function hookImages(root) { $$("[data-pkg][data-game].lazy", root).forEach(el =>
 
 // ---------------------------------------------------------------- shell
 const VIEWS = {
-  pretrip: { label: "Pre-Trip", icon: I.gauge, sub: "A walk-around of your setup before you drive." },
+  pretrip: { label: "Inspection", icon: I.gauge, sub: "A walk-around of your setup before you drive." },
   twin: { label: "Twin Rigs", icon: I.twin, sub: "Keep ETS2 and ATS feeling the same: controls, graphics, ReShade and mods." },
   studio: { label: "Studio", icon: I.layers, sub: "Drag to reorder. The mod at the top wins when two mods change the same file." },
   garage: { label: "Garage", icon: I.grid, sub: "Your mods, and named loadouts you can switch between in one click." },
@@ -681,7 +681,7 @@ function paintCrash(g) {
     <div><div class="caps" style="margin-bottom:6px">Call stack modules</div><div class="stack">${c.modules.map(m => `<span class="tag ${kindCol[m.kind]}" data-tip="${m.kind === "addon" ? "Not part of the game: ReShade, a plugin or an overlay" : m.kind === "game" ? "Ships with the game" : m.kind === "steam" ? "Steam client / overlay" : "Windows system file"}">${esc(m.name)}</span>`).join("")}</div></div>
     ${c.suspects.length ? `<div><div class="caps" style="margin-bottom:6px;color:var(--warn)">Mods named in the error log</div>${c.suspects.map(s => `<div class="quote"><b>${esc(s.name)}</b><div class="mono" style="font-size:11px;color:var(--muted)">${esc(s.lines[0])}</div></div>`).join("")}</div>` : `<div style="color:var(--muted);font-size:12.5px">No mod file is named in game.log's errors. If it keeps crashing, the crash finder below narrows it down.</div>`}
     ${c.log_errors.length ? `<div><div class="caps" style="margin-bottom:6px">Errors in game.log</div><div class="logbox">${c.log_errors.map(l => `<span class="e">${esc(l)}</span>`).join("\n")}</div></div>` : ""}`;
-  $("#crash-ack") && ($("#crash-ack").onclick = async () => { await api("ack", g, "crash", c.time); c.acked = true; S.data.inspect = null; paintCrash(g); toast("Crash marked as reviewed. Pre-Trip only flags it again if the game crashes again.", "ok") });
+  $("#crash-ack") && ($("#crash-ack").onclick = async () => { await api("ack", g, "crash", c.time); c.acked = true; S.data.inspect = null; paintCrash(g); toast("Crash marked as reviewed. Inspection only flags it again if the game crashes again.", "ok") });
 }
 function paintFinder(g) {
   const st = S.data.logbook[g].bisect, el = $("#finder"), names = st?.names || {};
@@ -771,7 +771,7 @@ function startRoad() {
   if (!S.owned.length) {
     $(".main").innerHTML = `<div class="empty" style="margin:auto;max-width:520px"><div class="seal" style="color:var(--amber)">${I.wheel}</div>
       <div class="big disp" style="font-size:30px">No truck sims found</div>
-      <div>Truck Config Manager looks for Euro Truck Simulator 2 or American Truck Simulator in your Steam libraries and a profile in Documents. Install one, launch it once, then reopen this app.</div></div>`;
+      <div>Pre-Trip looks for Euro Truck Simulator 2 or American Truck Simulator in your Steam libraries and a profile in Documents. Install one, launch it once, then reopen this app.</div></div>`;
     $$(".nav, .lamp").forEach(el => el.hidden = true); return;
   }
   if (!S.owned.includes(S.game)) S.game = S.owned[0];

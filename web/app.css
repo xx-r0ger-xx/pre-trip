@@ -1,4 +1,4 @@
-/* Truck Config Manager — web UI.
+/* Pre-Trip — web UI.
    Concept: the cab at night. Deep blue-black glass, instrument-cluster gauges, amber dash lighting,
    ETS2 blue / ATS red as the two "rigs". Display type is Bahnschrift (DIN, road-sign lettering) condensed. */
 :root {
@@ -99,7 +99,7 @@ button { font: inherit; color: inherit }
 @keyframes shimmer { to { background-position: -300% 0 } }
 .gamebadge { display: inline-grid; place-items: center; min-width: 44px; height: 26px; padding: 0 8px; border-radius: 7px; font: 700 13px/1 var(--display); letter-spacing: .06em; color: #fff; background: var(--c); box-shadow: 0 4px 16px color-mix(in srgb, var(--c) 45%, transparent) }
 
-/* ---------- pre-trip ---------- */
+/* ---------- inspection ---------- */
 .pt-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px }
 .clusters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); gap: 22px; position: relative }
 .cluster { padding: 22px 22px 18px; position: relative; overflow: hidden; container-type: inline-size }
