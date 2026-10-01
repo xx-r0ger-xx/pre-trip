@@ -12,9 +12,14 @@ two games in step, manages mod load order, and keeps a restorable history of eve
 - **Studio** – drag-and-drop load order in colored group lanes, live ▲/▼ badges for files a mod wins or
   loses to another, author notes, and an auto-sort that follows each mod author's own instructions.
 - **Garage** – mod gallery using each mod's preview image, plus named loadouts.
+- **Install mods** (Studio and Garage) – subscribe with a Steam Workshop link, install `.scs`/`.zip` files from
+  your Downloads folder, Browse…, or drop files onto the window. Zips that only wrap `.scs` files are unpacked.
+  Each mod's detail panel can remove it: local mods go to the Recycle Bin, Workshop mods are unsubscribed.
 - **Logbook** – timeline of controls snapshots, load-order and graphics backups, game updates and crashes,
   each restorable. Reads `game.crash.txt`/`game.log.txt`, and a crash finder that switches half the mods off
   per round to find the one crashing the game.
+- **Cleanup** – profile health, and the conflict copies cloud sync apps leave in game folders
+  (`controls - Copy.sii`, `(# Name clash …)`), moved to a quarantine folder with a manifest. Nothing is deleted.
 
 Every write refuses to run while the target game is open (the game rewrites its files on exit) and backs up
 what it replaces first, so every change can be undone from the Logbook.
@@ -38,7 +43,7 @@ alerts, crash-finder state and caches. (The folder keeps its original name so ex
 ## Classic app
 
 `app.pyw` is the original tkinter app (bindings snapshots and compare, mods list, installs, cleanup of
-cloud-sync leftovers). It still works with no extra dependencies but isn't getting new features.
+cloud-sync leftovers). Everything it does is now in Pre-Trip; it still works with no extra dependencies but isn't getting new features.
 
 ```
 pythonw app.pyw

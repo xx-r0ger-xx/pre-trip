@@ -339,3 +339,20 @@ button { font: inherit; color: inherit }
 
 /* text that sits straight on the scenery gets a soft shadow so it stays readable over bright trees and sky */
 .top .sub, .studio-legend, .acked-toggle, .pt-head .disp { text-shadow: 0 1px 8px rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.6) }
+
+/* ---------- install mods panel and cleanup ---------- */
+.drawer.wide { width: min(620px, 94vw); grid-template-rows: auto 1fr auto }
+.sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 22px 6px }
+.sheet-head h2 { margin: 6px 0 0; font-size: 30px }
+.sheet-foot { display: flex; align-items: center; gap: 12px; padding: 14px 22px; border-top: 1px solid var(--line); background: rgba(8,10,14,.6) }
+.isec { display: grid; gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--line) } .isec:last-child { border: 0 }
+.wcard { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; background: rgba(0,0,0,.3); border: 1px solid var(--line) }
+.wcard .nm, .dl .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.wcard .mt, .dl .mt { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.msg { font-size: 12.5px; color: var(--muted); padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.04) }
+.msg.bad { color: #ffb1ab; background: var(--crit-soft) } .msg.good { color: var(--ok); background: var(--ok-soft) }
+.dropzone { border: 1.5px dashed var(--line-hi); border-radius: 10px; padding: 14px; text-align: center; color: var(--muted); font-size: 13px }
+.dls { display: grid; gap: 6px; max-height: 42vh; overflow: auto }
+.dl { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 9px; background: rgba(255,255,255,.035); border: 1px solid var(--line) }
+.dl.muted { opacity: .6 }
+.results { display: grid; gap: 6px }

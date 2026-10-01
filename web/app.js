@@ -35,6 +35,7 @@ const I = {
   box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>',
   sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12m4 0h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
   leaf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19c0-8 5-14 15-15-1 10-7 15-15 15Z"/><path d="M5 19 13 11"/></svg>',
+  broom: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6M17 7l-6.5 6.5"/><path d="M10.5 13.5 4 20h6.5l3-3.5-3-3Z"/><path d="M7 17l2 2"/></svg>',
   pad: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 7h10a5 5 0 0 1 4.8 6.3l-1 3.8a2.5 2.5 0 0 1-4.3 1L14.3 16H9.7l-2.2 2.1a2.5 2.5 0 0 1-4.3-1l-1-3.8A5 5 0 0 1 7 7Z"/><path d="M7.5 10.5v3M6 12h3M15.5 11.5h.1M17.5 13h.1"/></svg>',
 };
 
@@ -127,6 +128,7 @@ const VIEWS = {
   studio: { label: "Studio", icon: I.layers, sub: "Drag to reorder. The mod at the top wins when two mods change the same file." },
   garage: { label: "Garage", icon: I.grid, sub: "Your mods, and named loadouts you can switch between in one click." },
   logbook: { label: "Logbook", icon: I.clock, sub: "Everything that happened to your setup, with a restore point at each step." },
+  cleanup: { label: "Cleanup", icon: I.broom, sub: "Profile health, and leftovers that cloud sync apps drop into the game folders." },
 };
 function initShell() {
   $("#logo").innerHTML = I.wheel;
@@ -146,9 +148,13 @@ async function pollRunning() {
   S.running = r;
   for (const g of S.owned) $("#lamp-" + g).classList.toggle("on", !!r[g]);
 }
-function usesGame(v) { return v === "studio" || v === "garage" || v === "logbook" }
+function usesGame(v) { return ["studio", "garage", "logbook", "cleanup"].includes(v) }
 function topBar() {
   const acts = $("#top-actions"); acts.innerHTML = "";
+  if (S.view === "garage" || S.view === "studio") {
+    const ib = document.createElement("button"); ib.className = "btn primary"; ib.innerHTML = `${I.plus}Install mods`; ib.onclick = () => openInstall(S.game);
+    acts.append(ib);
+  }
   if (usesGame(S.view) && S.owned.length === 1) {
     const b = document.createElement("span"); b.className = "gamebadge"; b.style.setProperty("--c", GAME[S.game].c); b.textContent = GAME[S.game].short;
     b.title = GAME[S.game].title; acts.append(b);
@@ -167,7 +173,7 @@ function render() {
   $("#title").textContent = VIEWS[S.view].label; $("#subtitle").textContent = VIEWS[S.view].sub;
   topBar();
   const v = $("#view"); v.classList.remove("view"); void v.offsetWidth; v.classList.add("view");
-  ({ pretrip: renderPretrip, twin: renderTwin, studio: renderStudio, garage: renderGarage, logbook: renderLogbook })[S.view]();
+  ({ pretrip: renderPretrip, twin: renderTwin, studio: renderStudio, garage: renderGarage, logbook: renderLogbook, cleanup: renderCleanup })[S.view]();
   renderDock();
 }
 async function refresh() {
@@ -549,15 +555,133 @@ function openDrawer(g, pkg) {
       ${m.notes?.length ? `<div><div class="caps" style="margin-bottom:8px">Author's load-order notes</div>${m.notes.map(n => `<div class="quote">${esc(n)}</div>`).join("")}${m.placement ? `<div style="color:var(--muted);font-size:12px;margin-top:6px">Auto-sort reads this as: <b style="color:var(--amber)">${esc(m.placement)}</b></div>` : ""}</div>` : ""}
       ${ov.length ? `<div><div class="caps" style="margin-bottom:8px">Shares files with</div><div class="ovlist">${ov.map(o => `<div class="ovrow"><span class="ov ${o.wins ? "win" : "lose"}">${o.wins ? "▲ wins" : "▼ loses"}</span><div style="min-width:0"><div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.mods[o.other]?.name || o.other)}</div><div class="mono" style="font-size:11px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.sample[0] || "")}</div></div><span class="mono" style="color:var(--muted)">${o.count}</span></div>`).join("")}</div></div>` : ""}
       ${m.description ? `<div><div class="caps" style="margin-bottom:8px">Description</div><div class="desc">${esc(m.description)}</div></div>` : ""}
-      <div class="row"><button class="btn ${on ? "" : "primary"}" id="dtoggle">${on ? I.minus + "Deactivate" : I.plus + "Activate"}</button><button class="btn ghost" id="dfolder">${I.folder}Mod folder</button></div>
+      <div class="row"><button class="btn ${on ? "" : "primary"}" id="dtoggle">${on ? I.minus + "Deactivate" : I.plus + "Activate"}</button><button class="btn ghost" id="dfolder">${I.folder}Mod folder</button><span class="grow"></span>${m.missing ? "" : `<button class="btn danger" id="dremove">${m.source === "workshop" ? I.x + "Unsubscribe" : I.x + "Remove"}</button>`}</div>
     </div>`;
   dr.classList.add("open"); dr.setAttribute("aria-hidden", "false"); $("#scrim").classList.add("on");
   hookImages(dr);
   $("#dclose").onclick = closeDrawer;
   $("#dfolder").onclick = () => api("open_folder", g, "mods");
   $("#dtoggle").onclick = () => { stage(g, on ? order(g).filter(x => x !== pkg) : [pkg, ...order(g)], pkg); openDrawer(g, pkg) };
+  $("#dremove") && ($("#dremove").onclick = async () => {
+    const ws = m.source === "workshop";
+    if (!await confirmBox({ title: ws ? `Unsubscribe from “${m.name}”?` : `Remove “${m.name}”?`, danger: true, ok: ws ? "Unsubscribe" : "Move to Recycle Bin",
+      body: ws ? `Steam removes the files. You can subscribe again from its Workshop page.` : "The file goes to the Recycle Bin, so you can still get it back.",
+      target: on ? `It's also taken out of ${GAME[g].short}'s load order (a backup is saved first).` : null })) return;
+    toast(await api("remove_mod", g, pkg), "ok"); closeDrawer(); S.data.mods[g] = null; S.staged[g] = null; S.data.inspect = null; render();
+  });
 }
-function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("on") }
+
+// ================================================================= INSTALL MODS (side panel)
+const kb = n => n > 1e9 ? (n / 1e9).toFixed(1) + " GB" : n > 1e6 ? (n / 1e6).toFixed(0) + " MB" : Math.max(1, Math.round(n / 1e3)) + " KB";
+async function openInstall(g = S.game, dropped = []) {
+  S.inst = { g, look: null, lookErr: "", downloads: null, extra: [], sel: new Set(), results: [], busy: false };
+  if (dropped.length) await addFiles(dropped, false);
+  paintInstall();
+  const dr = $("#drawer"); dr.classList.add("open", "wide"); dr.setAttribute("aria-hidden", "false"); $("#scrim").classList.add("on");
+  S.inst.downloads = await api("downloads", g); paintInstall();
+}
+async function addFiles(paths, repaint = true) {
+  const rows = await api("inspect_files", S.inst.g, paths);
+  for (const r of rows) {
+    if (!S.inst.extra.some(x => x.path === r.path)) S.inst.extra.unshift(r);
+    if (r.kind !== "unknown" && !r.installed) S.inst.sel.add(r.path);
+  }
+  if (repaint) paintInstall();
+}
+function fileRow(r) {
+  const state = r.kind === "unknown" ? ["Not a mod", "crit"] : r.installed ? ["Installed", "ok"] : r.other_game ? [`For ${r.hint.toUpperCase()}?`, "warn"] : ["Ready", "info"];
+  const can = r.kind !== "unknown" && !r.installed, on = S.inst.sel.has(r.path);
+  return `<div class="dl ${can ? "" : "muted"}">
+    ${can ? `<button class="cb ${on ? "on" : ""}" data-pick="${esc(r.path)}" aria-label="Select ${esc(r.name)}">${I.check}</button>` : "<span></span>"}
+    <div style="min-width:0"><div class="nm" title="${esc(r.path)}">${esc(r.name)}</div>
+      <div class="mt">${r.kind === "bundle" ? `zip with ${r.inner.length} mod${r.inner.length > 1 ? "s" : ""}: ${esc(r.inner.join(", "))}` : r.kind === "mod" ? "mod file" : "no manifest.sii, def folder or .scs inside"}${r.size ? ` · ${kb(r.size)}` : ""}</div></div>
+    <span class="tag ${state[1]}">${state[0]}</span></div>`;
+}
+function paintInstall() {
+  const s = S.inst, dr = $("#drawer"); if (!s) return;
+  const dl = s.downloads, rows = [...s.extra, ...(dl?.items || []).filter(d => !s.extra.some(x => x.path === d.path))];
+  const lk = s.look;
+  dr.innerHTML = `<div class="sheet-head"><div><div class="caps">${GAME[s.g].short} · ${GAME[s.g].title}</div><h2 class="disp">Install mods</h2></div><button class="btn sm" id="iclose">${I.x}</button></div>
+    <div class="body">
+      <section class="isec"><div class="caps">Steam Workshop</div>
+        <div class="row"><label class="search grow" style="min-width:0">${I.search}<input id="wlink" placeholder="Paste a Workshop link or item ID" value="${esc(s.linkText || "")}"></label><button class="btn" id="wlook">Look up</button></div>
+        ${s.lookErr ? `<div class="msg bad">${esc(s.lookErr)}</div>` : ""}
+        ${lk ? `<div class="wcard"><div style="min-width:0"><div class="nm">${esc(lk.title)}</div><div class="mt">${lk.for ? GAME[lk.for].title : "Not an ETS2/ATS item"} · ${kb(lk.size)}</div></div>
+          ${lk.subscribed ? '<span class="tag ok">Already subscribed</span>' : lk.matches ? `<button class="btn primary sm" id="wsub">${I.plus}Subscribe</button>` : `<span class="tag warn">Not for ${GAME[s.g].short}</span>`}</div>
+          ${lk.matches && !lk.subscribed ? `<div class="msg">Steam briefly shows ${GAME[s.g].short} as running while it subscribes. The mod downloads in the background and shows up in your mods when it's done.</div>` : ""}` : ""}
+      </section>
+      <section class="isec"><div class="row"><div class="caps grow">Files ${dl ? `· Downloads folder and anything you add` : ""}</div><button class="btn sm" id="ibrowse">${I.folder}Browse…</button></div>
+        <div class="dropzone">Drop <b>.scs</b> or <b>.zip</b> files anywhere on this window</div>
+        <div class="dls">${!dl && !rows.length ? '<div class="skeleton" style="min-height:120px"></div>' : rows.map(fileRow).join("") || '<div class="msg">No .scs or .zip mods in your Downloads folder.</div>'}</div>
+        ${s.results.length ? `<div class="results">${s.results.map(r => `<div class="msg ${r.ok ? "good" : "bad"}">${r.ok ? "Installed" : "Couldn't install"} <b>${esc(r.name)}</b>${r.ok ? (r.installed.length > 1 || r.installed[0] !== r.name ? ` → ${esc(r.installed.join(", "))}` : "") : `: ${esc(r.error)}`}</div>`).join("")}</div>` : ""}
+      </section>
+    </div>
+    <div class="sheet-foot"><span class="grow" style="color:var(--muted);font-size:12.5px">${s.sel.size ? `${s.sel.size} file(s) selected. Zips that only wrap .scs files are unpacked automatically.` : "Select files to install."}</span>
+      <button class="btn primary" id="igo" ${s.sel.size && !s.busy ? "" : "disabled"}>${I.plus}Install ${s.sel.size || ""}</button></div>`;
+  $("#iclose").onclick = closeDrawer;
+  $("#wlink").oninput = e => { s.linkText = e.target.value };
+  $("#wlink").onkeydown = e => { if (e.key === "Enter") $("#wlook").click() };
+  $("#wlook").onclick = async () => {
+    s.lookErr = ""; s.look = null; paintInstall();
+    try { s.look = await window.pywebview.api.workshop_lookup(s.g, s.linkText || "") } catch (e) { s.lookErr = String(e?.message || e) }
+    paintInstall();
+  };
+  $("#wsub") && ($("#wsub").onclick = async () => {
+    if (!await confirmBox({ title: `Subscribe to “${s.look.title}”?`, body: `Steam adds it to ${GAME[s.g].title} and downloads it in the background.`, ok: "Subscribe" })) return;
+    toast(await api("workshop_subscribe", s.g, s.look.id), "ok"); s.look.subscribed = true; S.data.mods[s.g] = null; paintInstall();
+  });
+  $("#ibrowse").onclick = async () => { const p = await api("browse", s.g); if (p.length) await addFiles(p) };
+  $(".dls").onclick = e => { const b = e.target.closest("[data-pick]"); if (!b) return; const p = b.dataset.pick; s.sel.has(p) ? s.sel.delete(p) : s.sel.add(p); paintInstall() };
+  $("#igo").onclick = async () => {
+    s.busy = true; paintInstall();
+    s.results = await api("install", s.g, [...s.sel]).finally(() => { s.busy = false });
+    const ok = s.results.filter(r => r.ok).length;
+    toast(ok ? `Installed ${ok} mod file(s). Turn them on in the Studio or Garage.` : "Nothing was installed.", ok ? "ok" : "warn");
+    s.sel.clear(); s.extra = s.extra.map(x => s.results.some(r => r.ok && r.name === x.name) ? { ...x, installed: true } : x);
+    s.downloads = await api("downloads", s.g); S.data.mods[s.g] = null; S.data.inspect = null; paintInstall();
+    if (S.view === "garage" || S.view === "studio") { await modsData(s.g); render() }
+  };
+}
+// files dropped onto the window: pywebview hands Python the real paths, which calls this
+window.onFilesDropped = async paths => { if (S.inst && $("#drawer").classList.contains("open")) await addFiles(paths); else await openInstall(S.game, paths) };
+// stop the web view from navigating to a file dropped outside the Studio's own drag and drop
+for (const ev of ["dragover", "drop"]) document.addEventListener(ev, e => { if ([...(e.dataTransfer?.types || [])].includes("Files")) e.preventDefault() });
+
+// ================================================================= CLEANUP
+async function renderCleanup() {
+  const v = $("#view"), g = S.game;
+  v.innerHTML = skeleton(1, 300);
+  const d = await api("cleanup", g); if (S.view !== "cleanup" || S.game !== g) return;
+  S.clean = { d, sel: new Set(d.items.map(i => i.rel)) };
+  paintCleanup();
+}
+function paintCleanup() {
+  const g = S.game, { d, sel } = S.clean, v = $("#view");
+  const col = { ok: "var(--ok)", warn: "var(--warn)", bad: "var(--crit)" };
+  v.innerHTML = `
+    <section class="panel" style="padding:16px 18px;margin-bottom:18px"><div class="caps" style="margin-bottom:10px">Profile health · ${GAME[g].short}</div>
+      ${d.health.map(h => `<div class="row" style="padding:4px 0"><span style="color:${col[h.level]}">●</span><span style="${h.level === "bad" ? "" : "color:var(--muted)"}">${esc(h.text)}</span></div>`).join("") || '<div style="color:var(--muted)">No profile yet. Launch the game once to create one.</div>'}</section>
+    <section class="panel"><div class="col-head"><h3 class="disp">Sync-conflict leftovers</h3><span class="tag ${d.items.length ? "warn" : "ok"}">${d.items.length}</span><span class="grow"></span>
+      <button class="btn ghost sm" id="qopen">${I.folder}Quarantine folder</button>
+      ${d.items.length ? `<button class="btn primary sm" id="qgo" ${sel.size ? "" : "disabled"}>Quarantine ${sel.size}</button>` : ""}</div>
+      ${d.items.length ? `<div class="list">${d.items.map(i => `<div class="dl"><button class="cb ${sel.has(i.rel) ? "on" : ""}" data-rel="${esc(i.rel)}">${I.check}</button>
+          <div style="min-width:0"><div class="nm mono" style="font-size:12.5px">${esc(i.rel)}</div><div class="mt">${kb(i.size)} · ${esc(fmtTime(i.modified))}</div></div><span></span></div>`).join("")}</div>
+        <p style="color:var(--muted);font-size:12.5px;padding:0 16px 16px;margin:0">Cloud sync apps leave copies like “controls - Copy.sii” or “(# Name clash …)” next to the real files. Quarantine moves them to ${esc(d.quarantine)} with a list of where each came from. Nothing is deleted.</p>`
+        : `<div class="insync" style="padding:34px 20px"><div class="seal">${I.seal}</div><div class="disp" style="font-size:22px">All clean</div><div style="color:var(--muted)">No sync-conflict leftovers in ${GAME[g].title}'s folder.</div></div>`}
+    </section>`;
+  $("#qopen").onclick = () => api("open_folder", g, "quarantine");
+  v.onclick = async e => {
+    const b = e.target.closest("[data-rel]");
+    if (b) { sel.has(b.dataset.rel) ? sel.delete(b.dataset.rel) : sel.add(b.dataset.rel); return paintCleanup() }
+    if (e.target.closest("#qgo")) {
+      if (!await confirmBox({ title: `Quarantine ${sel.size} file(s)?`, body: "They're moved out of the game folder, not deleted. You can put them back from the quarantine folder.", list: [...sel], ok: "Quarantine" })) return;
+      toast(await api("quarantine", g, [...sel]), "ok"); S.data.inspect = null; renderCleanup();
+    }
+  };
+}
+
+function closeDrawer() { $("#drawer").classList.remove("wide"); S.inst = null;
+ $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("on") }
 
 // dock: unsaved load order
 function renderDock() {

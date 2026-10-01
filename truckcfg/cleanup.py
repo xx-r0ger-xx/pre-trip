@@ -83,14 +83,16 @@ def quarantine(items: list[Clutter]) -> Path:
 
 def profile_health(profile: core.Profile) -> list[tuple[str, str]]:
     """[(level, message)] where level is 'ok', 'warn' or 'bad'."""
+    from truckcfg import loadorder  # local import: loadorder imports mods, which imports this module's deps
     out = []
     files = {p.name.lower() for p in profile.path.iterdir()}
-    if "profile.sii" not in files:
+    sii = loadorder.find_profile_sii(profile)  # Steam Cloud profiles keep profile.sii (and saves) in Steam's userdata
+    if not sii:
         out.append(("bad", "profile.sii is missing. Launch the game with Steam Cloud enabled to restore it; "
                            "until then the game can't load this profile's mods or save list."))
     if "config_local.cfg" not in files:
         out.append(("warn", "config_local.cfg is missing (per-profile settings will reset to defaults)."))
-    if not (profile.path / "save").is_dir():
+    if not any((d / "save").is_dir() for d in {profile.path, sii.parent if sii else profile.path}):
         out.append(("warn", "No save folder in this profile."))
     if not out:
         out.append(("ok", "Profile files look complete."))

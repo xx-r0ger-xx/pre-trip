@@ -11,7 +11,9 @@ import subprocess
 import zipfile
 from datetime import datetime, timedelta
 
-from truckcfg import conflicts, core, graphics, loadorder, logbook, mods
+from pathlib import Path
+
+from truckcfg import cleanup, conflicts, core, graphics, loadorder, logbook, mods, steamugc
 
 GAMES = core.GAMES
 _MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
@@ -185,6 +187,15 @@ class Api:
                 add(id="bisect", fp="running", sev="warn", title=f"Crash finder is running (round {bis['round']})",
                     detail="Some mods are switched off until you finish or stop it.", ack=False,
                     action={"kind": "view", "view": "logbook", "label": "Continue"})
+            clutter = cleanup.find_clutter(g)
+            if clutter:
+                add(id="clutter", fp=_fp(sorted(c.rel for c in clutter)), sev="warn",
+                    title=f"{len(clutter)} sync-conflict leftover file(s) in the game folder",
+                    detail="Copies like \"controls - Copy.sii\" or \"(# Name clash …)\" left by cloud sync. They can confuse the game.",
+                    action={"kind": "view", "view": "cleanup", "label": "Clean up"})
+            for level, msg in (cleanup.profile_health(p) if p else []):
+                if level == "bad":
+                    add(id="profile-health", fp=msg, sev="crit", title="Profile is damaged", detail=msg, ack=False)
             if not rs["installed"]:
                 add(id="reshade", fp="missing", sev="info", title="ReShade isn't installed",
                     detail="Optional. Sharpening and colour presets live in ATS/ETS2 Sync → ReShade.",
@@ -452,11 +463,109 @@ class Api:
         logbook.bisect_stop(_g(key))
         return "Crash finder stopped. Your original load order is back."
 
+    # ---------- installing and removing mods ----------
+    @staticmethod
+    def _download_row(game: core.Game, d) -> dict:
+        return {"path": str(d.path), "name": d.path.name, "kind": d.kind, "inner": [Path(n).name for n in d.inner],
+                "size": d.size, "modified": d.modified, "installed": d.installed, "hint": d.game_hint,
+                "other_game": d.game_hint not in (None, game.key)}
+
+    def downloads(self, key: str) -> dict:
+        g = _g(key)
+        return {"folder": str(mods.downloads_dir()), "items": [self._download_row(g, d) for d in mods.find_downloads(g)]}
+
+    def inspect_files(self, key: str, paths: list[str]) -> list[dict]:
+        """For dropped or browsed files: what each one is and whether it's already installed."""
+        g, have, out = _g(key), mods.installed_names(_g(key)), []
+        for s in paths:
+            path = Path(s)
+            kind, inner = mods.inspect_archive(path) if path.exists() else ("unknown", [])
+            names = [Path(n).name for n in inner]
+            out.append({"path": s, "name": path.name, "kind": kind, "inner": names,
+                        "size": path.stat().st_size if path.is_file() else 0,
+                        "installed": bool(names) and all(n.lower() in have for n in names),
+                        "hint": mods._game_hint(path.name), "other_game": mods._game_hint(path.name) not in (None, key)})
+        return out
+
+    def install(self, key: str, paths: list[str]) -> list[dict]:
+        """Install each file on its own, so one bad file doesn't stop the rest."""
+        g, out = _g(key), []
+        for s in paths:
+            try:
+                done = mods.install(g, Path(s))
+                out.append({"name": Path(s).name, "ok": True, "installed": [d.name for d in done]})
+            except (ValueError, FileExistsError, RuntimeError, OSError) as e:
+                out.append({"name": Path(s).name, "ok": False, "error": str(e)})
+        self._mods.pop(key, None)
+        return out
+
+    def browse(self, key: str) -> list[str]:
+        """Native file picker, starting in Downloads."""
+        import webview
+        win = webview.windows[0]
+        picked = win.create_file_dialog(webview.FileDialog.OPEN, directory=str(mods.downloads_dir()), allow_multiple=True,
+                                        file_types=("Truck sim mods (*.scs;*.zip)", "All files (*.*)"))
+        return list(picked or [])
+
+    def workshop_lookup(self, key: str, text: str) -> dict:
+        wid = mods.parse_workshop_id(text)
+        if not wid:
+            raise ValueError("That isn't a Workshop link or item ID. Paste a link like "
+                             "steamcommunity.com/sharedfiles/filedetails/?id=… or just the number.")
+        item = mods.workshop_item(wid)
+        owner = next((k for k, a in mods.STEAM_APP.items() if a == item["app"]), None)
+        subscribed = any(m.workshop_id == wid for m in self._mod_list(key))
+        return {**item, "for": owner, "matches": owner == key, "subscribed": subscribed}
+
+    def workshop_subscribe(self, key: str, workshop_id: str) -> str:
+        item = self.workshop_lookup(key, workshop_id)
+        if not item["matches"]:
+            raise RuntimeError(f"“{item['title']}” is a {GAMES[item['for']].title if item['for'] else 'different game'} "
+                               f"mod, not a {GAMES[key].title} one.")
+        steamugc.subscribe(_g(key), [workshop_id])
+        self._mods.pop(key, None)
+        return f"Subscribed to “{item['title']}”. Steam is downloading it; it appears in your mods when it's done."
+
+    def remove_mod(self, key: str, package: str) -> str:
+        """Local mods go to the Recycle Bin (undoable); Workshop mods are unsubscribed through Steam."""
+        m = next((x for x in self._mod_list(key) if x.package == package), None)
+        if not m:
+            raise LookupError("That mod isn't installed any more.")
+        if m.source == "workshop":
+            steamugc.unsubscribe(_g(key), [m.workshop_id])
+            msg = f"Unsubscribed from “{m.name}”. Steam removes the files."
+        else:
+            mods.remove(m)
+            msg = f"“{m.name}” moved to the Recycle Bin."
+        active = [e.package for e in self._order(key)]
+        if package in active:  # don't leave a dangling entry in the profile's load order
+            self.save_order(key, [x for x in active if x != package])
+        self._mods.pop(key, None)
+        return msg
+
+    # ---------- cleanup ----------
+    def cleanup(self, key: str) -> dict:
+        g = _g(key)
+        p = _profile(g)
+        items = cleanup.find_clutter(g)
+        return {"items": [{"rel": c.rel, "size": c.size, "modified": datetime.fromtimestamp(c.modified).isoformat(timespec="seconds")}
+                          for c in items],
+                "health": [{"level": lv, "text": tx} for lv, tx in (cleanup.profile_health(p) if p else [])],
+                "quarantine": str(cleanup.QUARANTINE)}
+
+    def quarantine(self, key: str, rels: list[str] | None = None) -> str:
+        g = _g(key)
+        items = [c for c in cleanup.find_clutter(g) if rels is None or c.rel in rels]
+        dest = cleanup.quarantine(items)
+        return f"Moved {len(items)} file(s) to the quarantine folder ({dest.name}). Nothing was deleted."
+
     # ---------- shell ----------
     def open_folder(self, key: str, which: str = "profile") -> None:
         g = _g(key)
         target = {"profile": _profile(g).path if _profile(g) else mods.game_dir(g), "mods": mods.mod_dir(g),
-                  "game": mods.game_dir(g), "store": core.STORE}.get(which, mods.game_dir(g))
+                  "game": mods.game_dir(g), "store": core.STORE, "quarantine": cleanup.QUARANTINE,
+                  "downloads": mods.downloads_dir()}.get(which, mods.game_dir(g))
+        target.mkdir(parents=True, exist_ok=True) if which == "quarantine" else None
         subprocess.Popen(["explorer", str(target)])
 
     def launch(self, key: str) -> None:

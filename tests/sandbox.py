@@ -76,6 +76,7 @@ class Sandbox:
     def __init__(self, games=("ets2", "ats")):
         self.games = games
         self.running: set[str] = set()
+        self.steam_calls: list[tuple] = []  # (action, game key, ids) - subscribe/unsubscribe never reach Steam
 
     # ---- layout
     def game_docs(self, key) -> Path:
@@ -110,6 +111,16 @@ class Sandbox:
             core.write_text_atomic(self.profile_sii(key), _profile_sii(active))
             self.bin_dir(key).mkdir(parents=True)
             (self.bin_dir(key) / game.exe).write_bytes(b"MZ")
+        (self.root / "Downloads").mkdir()
+        (self.root / "RecycleBin").mkdir()
+        if "ats" in self.games:  # one Workshop mod, so unsubscribe has something to act on
+            item = self.steam / "steamapps" / "workshop" / "content" / mods.STEAM_APP["ats"] / "1234567"
+            (item / "universal" / "sound").mkdir(parents=True)
+            (item / "versions.sii").write_text(
+                'SiiNunit\n{\npackage_version_info : .universal {\n package_name: "universal"\n}\n}\n')
+            (item / "universal" / "manifest.sii").write_text(
+                'SiiNunit\n{\nmod_package : .p {\n display_name: "Jake Brake Pack"\n author: "Dee"\n category[]: "sound"\n}\n}\n')
+            (item / "universal" / "sound" / "jake.bank").write_text("x")
         if "ats" in self.games:  # ReShade installed in ATS only
             b = self.bin_dir("ats")
             (b / "dxgi.dll").write_bytes(b"reshade")
@@ -128,6 +139,10 @@ class Sandbox:
         p("truckcfg.mods.steam_libraries", lambda: [self.steam])
         p("truckcfg.core.is_running", lambda game: game.key in self.running)
         p("truckcfg.mods.fetch_workshop_details", lambda ids: {})
+        p("truckcfg.mods.downloads_dir", lambda: self.root / "Downloads")
+        p("truckcfg.mods.recycle", lambda path: shutil.move(str(path), self.root / "RecycleBin" / Path(path).name))
+        p("truckcfg.steamugc.subscribe", lambda game, ids: self.steam_calls.append(("sub", game.key, list(ids))))
+        p("truckcfg.steamugc.unsubscribe", lambda game, ids: self.steam_calls.append(("unsub", game.key, list(ids))))
         for target, sub in (("truckcfg.core.STORE", ""), ("truckcfg.cleanup.QUARANTINE", "quarantine"),
                             ("truckcfg.conflicts.CACHE", "file_index_cache.json"), ("truckcfg.loadorder.BACKUPS", "profile-backups"),
                             ("truckcfg.logbook.LOADOUTS", "loadouts"), ("truckcfg.logbook.BISECT", "crash-finder"),
@@ -145,13 +160,14 @@ class Sandbox:
             if not str(Path(path).resolve()).lower().startswith(root):
                 raise AssertionError(f"write outside the sandbox: {path}")
 
-        real_atomic, real_copy2, real_copytree, real_write_text = (core.write_text_atomic, shutil.copy2, shutil.copytree,
-                                                                    Path.write_text)
+        real_atomic, real_copy2, real_copytree, real_write_text, real_move = (core.write_text_atomic, shutil.copy2, shutil.copytree,
+                                                                               Path.write_text, shutil.move)
         self._stack.enter_context(mock.patch("truckcfg.core.write_text_atomic",
                                              lambda path, text: (inside(path), real_atomic(path, text))[1]))
         self._stack.enter_context(mock.patch("shutil.copy2", lambda src, dst, **kw: (inside(dst), real_copy2(src, dst, **kw))[1]))
         self._stack.enter_context(mock.patch("shutil.copytree",
                                              lambda src, dst, *a, **kw: (inside(dst), real_copytree(src, dst, *a, **kw))[1]))
+        self._stack.enter_context(mock.patch("shutil.move", lambda src, dst, *a, **kw: (inside(dst), real_move(src, dst, *a, **kw))[1]))
         self._stack.enter_context(mock.patch.object(Path, "write_text",
                                                     lambda self_, data, *a, **kw: (inside(self_), real_write_text(self_, data, *a, **kw))[1]))
 
@@ -175,4 +191,9 @@ def api() -> webapi.Api:
     return webapi.Api()
 
 
-__all__ = ["Sandbox", "api", "MODS", "os"]
+def make_scs(path: Path, display="Downloaded Mod", files=("def/x.sii",)):
+    _scs(path, display, "Eve", "other", "", list(files))
+    return path
+
+
+__all__ = ["Sandbox", "api", "MODS", "make_scs", "os"]
