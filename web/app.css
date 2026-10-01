@@ -23,7 +23,7 @@ html, body { height: 100%; margin: 0 }
 body { background: var(--bg0); color: var(--text); font: 14px/1.5 var(--body); overflow: hidden; -webkit-font-smoothing: antialiased }
 button { font: inherit; color: inherit }
 ::selection { background: var(--amber-soft) }
-::-webkit-scrollbar { width: 10px; height: 10px } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.09); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box }
+::-webkit-scrollbar { width: 10px; height: 10px } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box }
 ::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,.16) } ::-webkit-scrollbar-track { background: transparent }
 
 .disp { font-family: var(--display); font-variation-settings: "wdth" 75, "wght" 600; letter-spacing: .01em }
@@ -42,8 +42,8 @@ button { font: inherit; color: inherit }
 .grain { position: absolute; inset: 0; opacity: .04; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>") }
 
 /* ---------- shell ---------- */
-.app { position: relative; z-index: 1; display: grid; grid-template-columns: 88px 1fr; height: 100% }
-.rail { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 0 16px; background: linear-gradient(180deg, rgba(8,10,14,.85), rgba(8,10,14,.65)); border-right: 1px solid var(--line); backdrop-filter: blur(18px) }
+.app { position: relative; z-index: 1; display: grid; grid-template-columns: 88px 1fr; grid-template-rows: minmax(0, 1fr); height: 100%; overflow: hidden }
+.rail { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 0 16px; min-height: 0; overflow: hidden auto; scrollbar-width: none; background: linear-gradient(180deg, rgba(8,10,14,.85), rgba(8,10,14,.65)); border-right: 1px solid var(--line); backdrop-filter: blur(18px) }
 .logo { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; margin-bottom: 18px;
   background: radial-gradient(circle at 30% 25%, var(--amber-hi), var(--amber) 55%, #c77a00); box-shadow: 0 8px 28px var(--amber-glow), inset 0 1px 0 rgba(255,255,255,.5); color: #1a1204 }
 .nav { width: 64px; padding: 10px 0 8px; border: 0; background: transparent; border-radius: 12px; cursor: pointer; display: grid; justify-items: center; gap: 5px; color: var(--faint); transition: color .2s, background .2s; position: relative }
@@ -59,7 +59,7 @@ button { font: inherit; color: inherit }
 .lamp.on i { background: var(--ok); box-shadow: 0 0 10px var(--ok) }
 .lamp.on { color: var(--text) }
 
-.main { display: grid; grid-template-rows: auto 1fr; min-width: 0; height: 100% }
+.main { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; height: 100% }
 .top { display: flex; align-items: center; gap: 18px; padding: 22px 34px 14px }
 .top h1 { margin: 0; font-size: 34px; line-height: 1 }
 .top .sub { color: var(--muted); margin-top: 6px; font-size: 13.5px }
@@ -101,8 +101,8 @@ button { font: inherit; color: inherit }
 
 /* ---------- pre-trip ---------- */
 .pt-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px }
-.clusters { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 22px; position: relative }
-.cluster { padding: 22px 22px 18px; position: relative; overflow: hidden }
+.clusters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); gap: 22px; position: relative }
+.cluster { padding: 22px 22px 18px; position: relative; overflow: hidden; container-type: inline-size }
 .cluster::before { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(140deg, color-mix(in srgb, var(--c) 55%, transparent), transparent 35%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none }
 .cluster .glow { position: absolute; width: 380px; height: 380px; right: -140px; top: -180px; background: radial-gradient(circle, color-mix(in srgb, var(--c) 22%, transparent), transparent 70%); pointer-events: none }
 .cl-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; position: relative }
@@ -167,7 +167,7 @@ button { font: inherit; color: inherit }
 .fx { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px }
 
 /* ---------- studio ---------- */
-.studio { display: grid; grid-template-columns: minmax(250px, 320px) 1fr; gap: 18px; align-items: start }
+.studio { display: grid; grid-template-columns: minmax(210px, 300px) minmax(0, 1fr); gap: 18px; align-items: start }
 .col-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line) }
 .col-head h3 { margin: 0; font-size: 17px }
 .list { padding: 10px; display: grid; gap: 6px; min-height: 120px }
@@ -240,7 +240,7 @@ button { font: inherit; color: inherit }
 
 /* ---------- logbook ---------- */
 .tl-wrap { padding: 16px 18px 12px; margin-bottom: 18px; overflow-x: auto }
-.tl { position: relative; min-width: 900px }
+.tl { position: relative; min-width: 680px }
 .tl .lane { display: grid; grid-template-columns: 120px 1fr; align-items: center; height: 36px }
 .tl .lane .ln { font: 600 10.5px/1 var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); display: flex; gap: 8px; align-items: center }
 .tl .lane .ln i { width: 8px; height: 8px; border-radius: 50%; background: var(--kc) }
@@ -251,8 +251,8 @@ button { font: inherit; color: inherit }
 .tl .axis { display: grid; grid-template-columns: 120px 1fr; margin-top: 6px } .tl .axis .tk { position: relative; height: 18px }
 .tl .axis .tk span { position: absolute; transform: translateX(-50%); font: 500 10.5px/1 var(--mono); color: var(--faint); white-space: nowrap }
 .tl .now { position: absolute; top: 0; bottom: 24px; width: 2px; background: linear-gradient(var(--amber), transparent); box-shadow: 0 0 10px var(--amber) }
-.tl .now::before { content: "NOW"; position: absolute; top: -2px; left: 6px; font: 700 9.5px/1 var(--body); letter-spacing: .1em; color: var(--amber) }
-.log-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 460px); gap: 18px; align-items: start }
+.tl .now::before { content: "NOW"; position: absolute; top: -2px; right: 6px; font: 700 9.5px/1 var(--body); letter-spacing: .1em; color: var(--amber) }
+.log-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 440px); gap: 18px; align-items: start }
 .events { padding: 6px 0 }
 .day { padding: 14px 18px 6px; font: 600 10.5px/1 var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--muted) }
 .ev { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; padding: 10px 18px; border-left: 2px solid transparent; transition: background .2s }
@@ -293,4 +293,38 @@ button { font: inherit; color: inherit }
 .target { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--crit-soft); color: #ffc2bd; font-size: 13px }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important } }
-@media (max-width: 1100px) { .studio, .log-grid { grid-template-columns: 1fr } .clusters { grid-template-columns: 1fr } }
+/* ---------- smaller windows ---------- */
+/* inside a narrow game panel: smaller gauges, and the alert buttons drop under the text instead of squeezing it */
+@container (max-width: 560px) {
+  .gauge .n { font-size: 20px } .gauge .l { font-size: 9px; letter-spacing: .06em }
+  .check { grid-template-columns: 4px 22px minmax(0, 1fr) }
+  .check .acts { grid-column: 3; justify-content: flex-start; margin-top: 2px }
+  .check .dd { white-space: normal }
+  .cl-head h2 { font-size: 20px }
+}
+@media (max-width: 1360px) { .studio-legend { display: none } }
+@media (max-width: 1180px) {
+  .top { padding: 18px 22px 10px } .top h1 { font-size: 28px } .scroll { padding: 6px 22px 110px }
+  .log-grid { grid-template-columns: 1fr }
+  .twin-grid { grid-template-columns: 30px minmax(110px, .8fr) minmax(0, 1fr) 36px minmax(0, 1fr) }
+}
+@media (max-width: 960px) {
+  .studio { grid-template-columns: 1fr } .lib-list { max-height: 210px }
+  .rail { padding-top: 12px } .nav { width: 58px } .app { grid-template-columns: 76px 1fr }
+  .only, .rs-cards { grid-template-columns: 1fr }
+}
+@media (max-height: 900px) { .logo { margin-bottom: 8px } .nav { padding: 8px 0 6px } .rail { gap: 3px } }
+@media (max-height: 760px) { .gauges { margin-bottom: 10px } .gauge svg { max-width: 104px } .cluster { padding-top: 16px } }
+
+/* ---------- alert actions, acknowledged alerts, binding review ---------- */
+.check .acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end }
+.check.acked { opacity: .55; --sc: var(--faint) !important }
+.check.acked .ic { color: var(--ok) }
+.acked-toggle { justify-self: start; border: 0; background: transparent; color: var(--muted); font: 600 12px/1 var(--body); padding: 8px 4px; cursor: pointer }
+.acked-toggle:hover { color: var(--text) }
+.drift { max-height: 46vh; overflow: auto; display: grid; gap: 4px; padding: 6px; background: rgba(0,0,0,.3); border-radius: 10px }
+.drift .dr { display: grid; grid-template-columns: minmax(90px, .7fr) minmax(0, 1fr) 18px minmax(0, 1fr); gap: 10px; align-items: center; padding: 7px 8px; border-radius: 7px; font-size: 12.5px }
+.drift .dr:nth-child(odd) { background: rgba(255,255,255,.03) }
+.drift .was { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(255,81,71,.5) } .drift .now { color: var(--text); font-weight: 600 }
+.drift .arr { color: var(--amber) }
+.modal .acts { flex-wrap: wrap }

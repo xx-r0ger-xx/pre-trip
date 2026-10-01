@@ -208,7 +208,13 @@ async function renderPretrip(rescan = false) {
   const ov = S.data.overview, ins = S.data.inspect;
   const sevIcon = { crit: I.crit, warn: I.warn, info: I.info, ok: I.check };
   const sevCol = { crit: "var(--crit)", warn: "var(--warn)", info: "var(--info)", ok: "var(--ok)" };
-  const total = Object.values(ins).flatMap(x => x.checks).filter(c => c.sev === "crit" || c.sev === "warn").length;
+  const total = Object.values(ins).flatMap(x => x.checks).filter(c => !c.acked && (c.sev === "crit" || c.sev === "warn")).length;
+  const checkRow = (g, c, i, gi) => `<div class="check ${c.acked ? "acked" : ""}" style="--sc:${sevCol[c.sev]};animation-delay:${.15 + i * .06 + gi * .1}s">
+    <span class="stripe"></span><span class="ic">${c.acked ? I.check : sevIcon[c.sev]}</span>
+    <div style="min-width:0"><div class="tt">${esc(c.title)}</div>${c.detail ? `<div class="dd" title="${esc(c.detail)}">${esc(c.detail)}</div>` : ""}</div>
+    <div class="acts">${c.acked ? `<button class="btn sm ghost" data-unack="${esc(c.id)}" data-g="${g}">Show again</button>` : `
+      ${c.action ? `<button class="btn sm" data-do="${i}" data-g="${g}">${esc(c.action.label)} →</button>` : ""}
+      ${c.ack ? `<button class="btn sm ghost" data-ack="${i}" data-g="${g}" data-tip="Hide this until something changes">${I.check}Acknowledge</button>` : ""}`}</div></div>`;
   v.innerHTML = `
     <div class="pt-head">
       <div class="grow"><div class="caps">Inspection</div><div class="disp" style="font-size:22px;margin-top:4px">${total ? `${total} thing${total > 1 ? "s" : ""} to look at before you drive` : (S.owned.length > 1 ? "Both rigs are ready to roll" : "Your rig is ready to roll")}</div></div>
@@ -222,10 +228,13 @@ async function renderPretrip(rescan = false) {
           <div class="grow"><h2 class="disp">${GAME[g].title}</h2><div class="meta">${o.version ? "v" + esc(o.version) : "version unknown until next launch"} · ${esc(o.profile || "no profile")} · ${d.active} of ${d.installed} mods active · ReShade ${d.reshade ? "on" : "off"}</div></div>
           <button class="btn sm" data-launch="${g}" ${o.running ? "disabled" : ""}>${I.play}${o.running ? "Running" : "Launch"}</button></div>
         <div class="gauges">${Object.entries(d.gauges).map(([k, x]) => gaugeFor(k, x)).join("")}</div>
-        <div class="checks">${d.checks.map((c, i) => `<div class="check" style="--sc:${sevCol[c.sev]};animation-delay:${.15 + i * .06 + gi * .1}s">
-          <span class="stripe"></span><span class="ic">${sevIcon[c.sev]}</span>
-          <div style="min-width:0"><div class="tt">${esc(c.title)}</div>${c.detail ? `<div class="dd" title="${esc(c.detail)}">${esc(c.detail)}</div>` : ""}</div>
-          ${c.view ? `<button class="btn sm ghost" data-open="${c.view}" data-g="${g}">Open →</button>` : "<span></span>"}</div>`).join("")}</div>
+        <div class="checks">${(() => {
+          const all = d.checks.map((c, i) => [c, i]), open = all.filter(([c]) => !c.acked), done = all.filter(([c]) => c.acked);
+          const rows = open.length ? open.map(([c, i]) => checkRow(g, c, i, gi)).join("")
+            : `<div class="check" style="--sc:var(--ok)"><span class="stripe"></span><span class="ic">${I.check}</span><div><div class="tt">All clear</div><div class="dd">Nothing needs attention.</div></div><span></span></div>`;
+          return rows + (done.length ? `<button class="acked-toggle" data-showacked="${g}">${S.showAcked?.[g] ? "Hide" : "Show"} ${done.length} acknowledged</button>
+            ${S.showAcked?.[g] ? done.map(([c, i]) => checkRow(g, c, i, 0)).join("") : ""}` : "");
+        })()}</div>
       </section>`;
     }).join("")}</div>
     ${S.owned.length === 1 ? `<div class="panel" style="margin-top:18px;padding:14px 18px;display:flex;gap:12px;align-items:center;color:var(--muted);font-size:13px">
@@ -239,10 +248,46 @@ async function renderPretrip(rescan = false) {
     $$(".cluster", v).forEach(c => { const s = document.createElement("div"); s.className = "sweep"; c.append(s) });
     await renderPretrip(true); toast("Inspection complete.", "ok");
   };
-  v.onclick = e => {
-    const o = e.target.closest("[data-open]"); if (o) { S.game = o.dataset.g; persist(); go(o.dataset.open) }
+  v.onclick = async e => {
+    const el = e.target.closest("[data-do],[data-ack],[data-unack],[data-showacked]");
+    if (el) {
+      const g = el.dataset.g || el.dataset.showacked, c = ins[g]?.checks[+(el.dataset.do ?? el.dataset.ack)];
+      if (el.dataset.showacked) { S.showAcked = { ...S.showAcked, [g]: !S.showAcked?.[g] }; return renderPretrip() }
+      if (el.dataset.unack) { await api("unack", g, el.dataset.unack); return renderPretrip(true) }
+      if (el.dataset.ack !== undefined) {
+        await api("ack", g, c.id, c.fp); c.acked = true;
+        el.closest(".check").animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateX(24px)" }], { duration: 260, easing: "ease-in" }).onfinish = () => renderPretrip();
+        return toast("Acknowledged. It comes back if anything changes.", "info");
+      }
+      return runAction(g, c.action);
+    }
     const l = e.target.closest("[data-launch]"); if (l) { api("launch", l.dataset.launch); toast(`Launching ${GAME[l.dataset.launch].title} through Steam…`, "info") }
   };
+}
+
+async function runAction(g, a) {
+  if (!a) return;
+  S.game = g; persist();
+  if (a.kind === "view") return go(a.view);
+  if (a.kind === "autosort") { S.pending = { autosort: true }; return go("studio") }
+  if (a.kind === "mod") { S.pending = { drawer: a.package }; return go("studio") }
+  if (a.kind === "drift") return reviewDrift(g);
+}
+async function reviewDrift(g) {
+  const d = await api("drift", g);
+  if (!d.rows.length) { toast("Nothing changed since the last snapshot.", "info"); S.data.inspect = null; return renderPretrip() }
+  const box = $("#modal-box"), bg = $("#modal");
+  box.innerHTML = `<h3 class="disp">${d.rows.length} binding${d.rows.length > 1 ? "s" : ""} changed in ${GAME[g].short}</h3>
+    <p>Compared with the snapshot from <b style="color:var(--text)">${esc(fmtTime(d.snapshot.created))}</b> (${esc(d.snapshot.label)}). If you made these changes, keep them. If the game or an update reset your controls, restore the old ones.</p>
+    <div class="drift">${d.rows.map(r => `<div class="dr"><span class="mono">${esc(r.name)}</span><span class="was">${esc(r.before)}</span><span class="arr">→</span><span class="now">${esc(r.after)}</span></div>`).join("")}</div>
+    <div class="acts"><button class="btn ghost" data-a="no">Decide later</button><button class="btn danger" data-a="restore">${I.undo}Restore old bindings</button><button class="btn primary" data-a="keep">${I.check}Keep new bindings</button></div>`;
+  bg.classList.add("on");
+  const choice = await new Promise(res => { box.onclick = e => { const a = e.target.closest("[data-a]")?.dataset.a; if (a) res(a) }; bg.onclick = e => { if (e.target === bg) res("no") } });
+  bg.classList.remove("on");
+  if (choice === "keep") toast(await api("snapshot", g, "reviewed-kept"), "ok");
+  else if (choice === "restore") toast(await api("restore", g, "snapshot", d.snapshot.id), "ok");
+  else return;
+  S.data.inspect = null; S.data.logbook[g] = null; S.data.twin = null; renderPretrip();
 }
 
 // ================================================================= TWIN RIGS
@@ -376,6 +421,9 @@ async function renderStudio() {
     stage(g, rec, "__all"); toast(`Auto-sorted: ${moved} position(s) changed. Review, then save.`, "ok");
   };
   wireDnD(); paintStudio(false);
+  const pend = S.pending; S.pending = null;
+  if (pend?.autosort) $("#autosort").click();
+  if (pend?.drawer) { S.selPkg = pend.drawer; paintStudio(false); openDrawer(g, pend.drawer) }
 }
 function flip(container, fn) {
   const before = new Map($$("[data-pkg]", container).map(el => [el.dataset.pkg + el.dataset.where, el.getBoundingClientRect()]));
@@ -601,11 +649,13 @@ function paintCrash(g) {
   const c = S.data.logbook[g].crash, el = $("#crash");
   if (!c.present) { el.innerHTML = `<div class="row"><span class="gamebadge" style="--c:var(--ok)">OK</span><div><b>No crash on record</b><div style="color:var(--muted);font-size:12.5px">${GAME[g].short} has no game.crash.txt.</div></div></div>`; return }
   const kindCol = { game: "info", windows: "", steam: "", addon: "warn" };
-  el.innerHTML = `<div class="row"><div class="grow"><div class="caps" style="color:var(--crit)">Last crash</div><div class="big" style="margin-top:6px">${esc(fmtTime(c.time))}</div></div><span class="tag">${esc(c.build)}</span></div>
+  el.innerHTML = `<div class="row wrap"><div class="grow"><div class="caps" style="color:${c.acked ? "var(--muted)" : "var(--crit)"}">Last crash${c.acked ? " · reviewed" : ""}</div><div class="big" style="margin-top:6px">${esc(fmtTime(c.time))}</div></div><span class="tag">${esc(c.build)}</span>
+      ${c.acked ? `<span class="tag ok">Reviewed</span>` : `<button class="btn sm" id="crash-ack">${I.check}Mark as reviewed</button>`}</div>
     <div style="font-size:13px">${esc(c.summary)}</div>
     <div><div class="caps" style="margin-bottom:6px">Call stack modules</div><div class="stack">${c.modules.map(m => `<span class="tag ${kindCol[m.kind]}" data-tip="${m.kind === "addon" ? "Not part of the game: ReShade, a plugin or an overlay" : m.kind === "game" ? "Ships with the game" : m.kind === "steam" ? "Steam client / overlay" : "Windows system file"}">${esc(m.name)}</span>`).join("")}</div></div>
     ${c.suspects.length ? `<div><div class="caps" style="margin-bottom:6px;color:var(--warn)">Mods named in the error log</div>${c.suspects.map(s => `<div class="quote"><b>${esc(s.name)}</b><div class="mono" style="font-size:11px;color:var(--muted)">${esc(s.lines[0])}</div></div>`).join("")}</div>` : `<div style="color:var(--muted);font-size:12.5px">No mod file is named in game.log's errors. If it keeps crashing, the crash finder below narrows it down.</div>`}
     ${c.log_errors.length ? `<div><div class="caps" style="margin-bottom:6px">Errors in game.log</div><div class="logbox">${c.log_errors.map(l => `<span class="e">${esc(l)}</span>`).join("\n")}</div></div>` : ""}`;
+  $("#crash-ack") && ($("#crash-ack").onclick = async () => { await api("ack", g, "crash", c.time); c.acked = true; S.data.inspect = null; paintCrash(g); toast("Crash marked as reviewed. Pre-Trip only flags it again if the game crashes again.", "ok") });
 }
 function paintFinder(g) {
   const st = S.data.logbook[g].bisect, el = $("#finder"), names = st?.names || {};

@@ -3,6 +3,8 @@ through the same guarded, backed-up paths as the desktop app."""
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -37,6 +39,20 @@ def _need_profile(game: core.Game) -> core.Profile:
     if not p:
         raise RuntimeError(f"{game.title} has no profile yet. Launch it once and create one, then try again.")
     return p
+
+
+ACKS = core.STORE / "acknowledged.json"
+
+
+def _fp(items) -> str:
+    return hashlib.sha1("|".join(map(str, items)).encode()).hexdigest()[:12]
+
+
+def _acks() -> dict:
+    try:
+        return json.loads(ACKS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def _norm(name: str) -> str:
@@ -111,7 +127,7 @@ class Api:
                                               lambda e: by[e.package].description if e.package in by else "")
             moves = sum(a != b for a, b in zip(rec, order))
             p = _profile(g)
-            drift = 0
+            drift, rows, snaps = 0, [], []
             if p and (snaps := core.list_snapshots(p)):
                 rows, _ = core.diff_snapshot(snaps[0], p)
                 drift = len([r for r in rows if r.mapped])
@@ -122,38 +138,50 @@ class Api:
             rs = graphics.reshade(g)
             bis = logbook.bisect_state(g)
 
+            drift_rows = rows if p and snaps else []
+            # every check: id (stable), fp (fingerprint of what it's about - an acknowledgement only holds while
+            # fp is unchanged, so a new crash or more drift brings it back), and one clear next step
+            add = lambda **c: checks.append({"detail": "", "action": None, "ack": True, **c})
             if not p:
-                checks.append({"sev": "warn", "title": "No profile yet",
-                               "detail": f"Launch {g.title} once and create a profile - then controls and load order show up here.",
-                               "view": None})
+                add(id="profile", fp="none", sev="warn", title="No profile yet", ack=False,
+                    detail=f"Launch {g.title} once and create a profile. Controls and load order show up here after that.")
             if missing:
-                checks.append({"sev": "crit", "title": f"{len(missing)} active mod(s) aren't installed",
-                               "detail": ", ".join(missing[:4]), "view": "studio"})
+                add(id="missing", fp=_fp(missing), sev="crit", title=f"{len(missing)} active mod(s) aren't installed",
+                    detail=", ".join(missing[:4]), action={"kind": "view", "view": "studio", "label": "Open Studio"})
             if outdated:
-                checks.append({"sev": "warn", "title": f"{len(outdated)} active mod(s) not marked for {mods.short_version(ver)}",
-                               "detail": ", ".join(outdated[:4]), "view": "studio"})
+                add(id="outdated", fp=_fp(outdated + [ver or ""]), sev="warn",
+                    title=f"{len(outdated)} active mod(s) not marked for {mods.short_version(ver)}",
+                    detail=", ".join(outdated[:4]), action={"kind": "view", "view": "studio", "label": "Open Studio"})
             if moves:
-                checks.append({"sev": "warn", "title": f"Load order differs from the authors' notes ({moves} moves)",
-                               "detail": "Auto-sort in the Load Order Studio fixes it.", "view": "studio"})
+                add(id="order", fp=_fp([e.package for e in order]), sev="warn",
+                    title=f"Load order doesn't follow the mod authors' notes ({moves} moves)",
+                    detail="Auto-sort proposes the fix. You review it, then save.",
+                    action={"kind": "autosort", "label": "Fix with auto-sort"})
             for a, o in pairs[:3]:
-                checks.append({"sev": "info", "title": f"{self._name(by, a)} overrides {o['count']} files of "
-                                                       f"{self._name(by, o['other'])}",
-                               "detail": o["sample"][0] if o["sample"] else "", "view": "studio"})
+                add(id=f"overlap:{a}:{o['other']}", fp=str(o["count"]), sev="info",
+                    title=f"{self._name(by, a)} overrides {o['count']} files of {self._name(by, o['other'])}",
+                    detail="Normal for add-ons. Only change it if the mod you want isn't winning.",
+                    action={"kind": "mod", "package": a, "label": "See files"})
             if drift:
-                checks.append({"sev": "warn", "title": f"{drift} binding(s) changed since the last snapshot",
-                               "detail": "If that was you, take a snapshot. If the game reset them, restore.",
-                               "view": "logbook"})
+                add(id="drift", fp=_fp([snaps[0].path.name] + [f"{r.name}={r.right}" for r in drift_rows if r.mapped]),
+                    sev="warn", title=f"{drift} binding(s) changed since the last snapshot",
+                    detail="Review what changed, then keep the new bindings or restore the old ones.",
+                    action={"kind": "drift", "label": "Review changes"}, ack=False)
             if crash["present"] and crash_age is not None and crash_age <= 14:
-                checks.append({"sev": "crit" if crash_age <= 2 else "warn",
-                               "title": f"Crashed {self._ago(crash['time'])}", "detail": crash["summary"],
-                               "view": "logbook"})
+                add(id="crash", fp=crash["time"], sev="crit" if crash_age <= 2 else "warn",
+                    title=f"Crashed {self._ago(crash['time'])}", detail=crash["summary"],
+                    action={"kind": "view", "view": "logbook", "label": "Crash details"})
             if bis:
-                checks.append({"sev": "warn", "title": f"Crash finder is running (round {bis['round']})",
-                               "detail": "Some mods are switched off until you finish or stop it.", "view": "logbook"})
+                add(id="bisect", fp="running", sev="warn", title=f"Crash finder is running (round {bis['round']})",
+                    detail="Some mods are switched off until you finish or stop it.", ack=False,
+                    action={"kind": "view", "view": "logbook", "label": "Continue"})
             if not rs["installed"]:
-                checks.append({"sev": "info", "title": "ReShade isn't installed", "detail": "", "view": "twin"})
-            if not checks:
-                checks.append({"sev": "ok", "title": "All clear", "detail": "Nothing needs attention.", "view": None})
+                add(id="reshade", fp="missing", sev="info", title="ReShade isn't installed",
+                    detail="Optional. Sharpening and colour presets live in Twin Rigs → ReShade.",
+                    action={"kind": "view", "view": "twin", "label": "Open"} if len(owned()) > 1 else None)
+            acks = _acks().get(k, {})
+            for c in checks:
+                c["acked"] = c["ack"] and acks.get(c["id"]) == c["fp"]
             n_active = len([m for m in active if m])
             res[k] = {
                 "gauges": {
@@ -166,10 +194,36 @@ class Api:
                               "label": "Days since crash",
                               "text": str(crash_age) if crash_age is not None else "—"},
                 },
-                "checks": checks, "version": ver, "active": len(order), "installed": len(ms),
+                "checks": checks or [{"id": "ok", "sev": "ok", "title": "All clear", "detail": "Nothing needs attention.",
+                                      "action": None, "ack": False, "acked": False}], "version": ver, "active": len(order), "installed": len(ms),
                 "reshade": rs["installed"],
             }
         return res
+
+    def ack(self, key: str, check_id: str, fp: str) -> None:
+        data = _acks()
+        data.setdefault(key, {})[check_id] = fp
+        ACKS.parent.mkdir(parents=True, exist_ok=True)
+        ACKS.write_text(json.dumps(data, indent=1), encoding="utf-8")
+
+    def unack(self, key: str, check_id: str) -> None:
+        data = _acks()
+        data.get(key, {}).pop(check_id, None)
+        ACKS.write_text(json.dumps(data, indent=1), encoding="utf-8")
+
+    def drift(self, key: str) -> dict:
+        """What changed in the controls since the latest snapshot, for the review dialog."""
+        p = _need_profile(_g(key))
+        snaps = core.list_snapshots(p)
+        if not snaps:
+            return {"snapshot": None, "rows": []}
+        rows, other = core.diff_snapshot(snaps[0], p)
+        return {"snapshot": {"id": snaps[0].path.name, "label": snaps[0].meta.get("label") or "manual",
+                             "created": snaps[0].created},
+                "rows": [{"name": r.name, "before": core.pretty_input(r.kind, r.left) if r.left is not None else "—",
+                          "after": core.pretty_input(r.kind, r.right) if r.right is not None else "—"}
+                         for r in rows if r.mapped],
+                "other_files": other}
 
     @staticmethod
     def _name(by, pkg):
@@ -357,6 +411,7 @@ class Api:
         g = _g(key)
         info = {m.package: m.name for m in self._mod_list(key)}
         crash = logbook.crash_report(g)
+        crash["acked"] = bool(crash["time"]) and _acks().get(key, {}).get("crash") == crash["time"]
         for s in crash["suspects"]:
             s["name"] = info.get(s["package"], s["package"])
         st = logbook.bisect_state(g)
