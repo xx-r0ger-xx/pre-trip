@@ -204,7 +204,7 @@ async function renderPretrip(rescan = false) {
   const v = $("#view");
   if (!S.data.inspect || rescan) {
     if (!S.data.inspect) v.innerHTML = skeleton(2, 440);
-    const [ov, ins] = await Promise.all([api("overview"), api("inspect")]);
+    const [ov, ins] = await Promise.all([api("overview"), api("inspect", Object.fromEntries(S.owned.filter(dirty).map(g => [g, S.staged[g]])))]);
     S.data.overview = ov; S.data.inspect = ins;
     if (S.view !== "pretrip") return;
   }
@@ -418,7 +418,7 @@ async function modsData(g) {
 const order = g => S.staged[g] || S.data.mods[g]?.order || [];
 const dirty = g => !!S.staged[g] && !same(S.staged[g], S.data.mods[g]?.order);
 function stage(g, next, flash) {
-  S.staged[g] = next; S.flash = flash;
+  S.staged[g] = next; S.flash = flash; S.data.inspect = null;  // Inspection re-checks the unsaved order next time
   clearTimeout(S.ovT); S.ovT = setTimeout(async () => { S.ov[g] = await api("overlaps_for", g, next); if (S.view === "studio" && S.game === g) paintStudio(false) }, 120);
   if (S.view === "studio") paintStudio(true); else if (S.view === "garage") paintGarage(); renderDock();
 }
@@ -569,7 +569,7 @@ function renderDock() {
     <div><b>Unsaved load order</b><div style="color:var(--muted);font-size:12px">${[added && `${added} added`, removed && `${removed} removed`, moved && `${moved} moved`].filter(Boolean).join(" · ") || "reordered"}</div></div>
     <button class="btn ghost" id="discard">${I.undo}Discard</button><button class="btn primary" id="save">${I.save}Save to ${GAME[g].short}</button>`;
   dock.classList.add("show");
-  $("#discard").onclick = () => { S.staged[g] = null; S.ov[g] = null; S.flash = "__all"; render() };
+  $("#discard").onclick = () => { S.staged[g] = null; S.ov[g] = null; S.flash = "__all"; S.data.inspect = null; render() };
   $("#save").onclick = async () => {
     const msg = await api("save_order", g, S.staged[g]);
     toast(msg, "ok"); S.data.mods[g] = null; S.staged[g] = null; S.ov[g] = null; S.data.inspect = null; await modsData(g); render();

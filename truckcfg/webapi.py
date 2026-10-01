@@ -108,7 +108,9 @@ class Api:
         return out
 
     # ---------- inspection ----------
-    def inspect(self) -> dict:
+    def inspect(self, staged: dict | None = None) -> dict:
+        """staged: {game: [package, ...]} - unsaved Studio orders. They're inspected as if saved, and flagged."""
+        staged = staged or {}
         res = {}
         for k in owned():
             g = GAMES[k]
@@ -116,6 +118,10 @@ class Api:
             ms = self._mod_list(k, fresh=True)
             by = {m.package: m for m in ms}
             order = self._order(k)
+            unsaved = k in staged and [e.package for e in order] != staged[k]
+            if unsaved:
+                saved = {e.package: e for e in order}
+                order = [saved.get(p) or loadorder.Entry(p, by[p].display if p in by else p) for p in staged[k]]
             ver = mods.game_version(g)
             active = [by.get(e.package) for e in order]
             outdated = [m.name for m in active if m and m.compat(ver) == "outdated"]
@@ -142,6 +148,10 @@ class Api:
             # every check: id (stable), fp (fingerprint of what it's about - an acknowledgement only holds while
             # fp is unchanged, so a new crash or more drift brings it back), and one clear next step
             add = lambda **c: checks.append({"detail": "", "action": None, "ack": True, **c})
+            if unsaved:
+                add(id="unsaved", fp="", sev="warn", ack=False, title="Unsaved load order changes in the Studio",
+                    detail="The game still has the old order. Inspection is checking your Studio changes as if they were saved.",
+                    action={"kind": "view", "view": "studio", "label": "Save or discard"})
             if not p:
                 add(id="profile", fp="none", sev="warn", title="No profile yet", ack=False,
                     detail=f"Launch {g.title} once and create a profile. Controls and load order show up here after that.")
