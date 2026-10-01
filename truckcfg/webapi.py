@@ -197,6 +197,9 @@ class Api:
                 "checks": checks or [{"id": "ok", "sev": "ok", "title": "All clear", "detail": "Nothing needs attention.",
                                       "action": None, "ack": False, "acked": False}], "version": ver, "active": len(order), "installed": len(ms),
                 "reshade": rs["installed"],
+                "overlaps": [{"winner": a, "winner_name": self._name(by, a), "loser": o["other"],
+                              "loser_name": self._name(by, o["other"]), "count": o["count"], "sample": o["sample"][:3]}
+                             for a, o in sorted(pairs, key=lambda x: -x[1]["count"])],
             }
         return res
 

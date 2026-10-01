@@ -188,14 +188,15 @@ function gaugeSVG(frac, col) {
     <line class="needle" x1="60" y1="60" x2="60" y2="30" style="transform:rotate(-120deg)" data-rot="${-120 + 240 * Math.max(0, Math.min(1, frac))}"/>
     <circle class="hub" cx="60" cy="60" r="5"/></svg>`;
 }
-function gaugeFor(key, g) {
+const GAUGE_GO = { mods: "Open the Studio", conflicts: "See every file overlap", drift: "Review binding changes", crash: "Open the crash details" };
+function gaugeFor(key, g, game) {
   const f = g.max ? g.value / g.max : 0;
   const col = key === "mods" ? (g.value >= g.max ? "var(--ok)" : "var(--warn)")
     : key === "conflicts" ? (g.value ? "var(--info)" : "var(--ok)")
     : key === "drift" ? (g.value ? "var(--warn)" : "var(--ok)")
     : (g.text === "—" || g.value >= 7 ? "var(--ok)" : g.value >= 3 ? "var(--warn)" : "var(--crit)");
   const frac = key === "crash" && g.text === "—" ? 1 : f;
-  return `<div class="gauge">${gaugeSVG(frac, col)}<div class="n num">${esc(g.text)}</div><div class="l">${esc(g.label)}</div></div>`;
+  return `<button class="gauge" data-gauge="${key}" data-g="${game}" data-tip="${GAUGE_GO[key]}">${gaugeSVG(frac, col)}<div class="n num">${esc(g.text)}</div><div class="l">${esc(g.label)}</div></button>`;
 }
 async function renderPretrip(rescan = false) {
   const v = $("#view");
@@ -227,7 +228,7 @@ async function renderPretrip(rescan = false) {
         <div class="cl-head"><span class="gamebadge" style="--c:${GAME[g].c}">${GAME[g].short}</span>
           <div class="grow"><h2 class="disp">${GAME[g].title}</h2><div class="meta">${o.version ? "v" + esc(o.version) : "version unknown until next launch"} · ${esc(o.profile || "no profile")} · ${d.active} of ${d.installed} mods active · ReShade ${d.reshade ? "on" : "off"}</div></div>
           <button class="btn sm" data-launch="${g}" ${o.running ? "disabled" : ""}>${I.play}${o.running ? "Running" : "Launch"}</button></div>
-        <div class="gauges">${Object.entries(d.gauges).map(([k, x]) => gaugeFor(k, x)).join("")}</div>
+        <div class="gauges">${Object.entries(d.gauges).map(([k, x]) => gaugeFor(k, x, g)).join("")}</div>
         <div class="checks">${(() => {
           const all = d.checks.map((c, i) => [c, i]), open = all.filter(([c]) => !c.acked), done = all.filter(([c]) => c.acked);
           const rows = open.length ? open.map(([c, i]) => checkRow(g, c, i, gi)).join("")
@@ -249,6 +250,8 @@ async function renderPretrip(rescan = false) {
     await renderPretrip(true); toast("Inspection complete.", "ok");
   };
   v.onclick = async e => {
+    const gz = e.target.closest("[data-gauge]");
+    if (gz) return gaugeClick(gz.dataset.g, gz.dataset.gauge);
     const el = e.target.closest("[data-do],[data-ack],[data-unack],[data-showacked]");
     if (el) {
       const g = el.dataset.g || el.dataset.showacked, c = ins[g]?.checks[+(el.dataset.do ?? el.dataset.ack)];
@@ -262,6 +265,29 @@ async function renderPretrip(rescan = false) {
       return runAction(g, c.action);
     }
     const l = e.target.closest("[data-launch]"); if (l) { api("launch", l.dataset.launch); toast(`Launching ${GAME[l.dataset.launch].title} through Steam…`, "info") }
+  };
+}
+
+// gauges always lead somewhere, whatever has been acknowledged
+function gaugeClick(g, key) {
+  if (key === "mods") return runAction(g, { kind: "view", view: "studio" });
+  if (key === "drift") return reviewDrift(g);
+  if (key === "crash") return runAction(g, { kind: "view", view: "logbook" });
+  const list = S.data.inspect[g].overlaps, box = $("#modal-box"), bg = $("#modal");
+  box.innerHTML = `<h3 class="disp">File overlaps in ${GAME[g].short}</h3>
+    <p>${list.length ? "When two active mods change the same file, the one higher in the load order wins. That's normal for add-ons and patches. Open a mod to see exactly which files it wins and loses." : "No two active mods change the same file."}</p>
+    ${list.length ? `<div class="drift">${list.map((o, i) => `<div class="ovpair"><span class="ov win">▲</span>
+      <div style="min-width:0"><div><b>${esc(o.winner_name)}</b> <span style="color:var(--muted)">wins over</span> <b>${esc(o.loser_name)}</b></div>
+      <div class="mono" style="font-size:11px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.sample[0] || "")}</div></div>
+      <span class="mono" style="color:var(--muted)" data-tip="Shared files">${o.count}</span><button class="btn sm" data-ovi="${i}">See files →</button></div>`).join("")}</div>` : ""}
+    <div class="acts"><button class="btn ghost" data-a="close">Close</button></div>`;
+  bg.classList.add("on");
+  const close = () => bg.classList.remove("on");
+  bg.onclick = e => { if (e.target === bg) close() };
+  box.onclick = e => {
+    if (e.target.closest('[data-a="close"]')) return close();
+    const b = e.target.closest("[data-ovi]"); if (!b) return;
+    close(); runAction(g, { kind: "mod", package: list[+b.dataset.ovi].winner });
   };
 }
 
