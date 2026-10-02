@@ -407,7 +407,7 @@ class Api:
                     data = f.read_bytes() if f.is_file() else None
                 else:
                     with zipfile.ZipFile(m.package_path) as z:
-                        data = z.read(m.icon)
+                        data = mods.zip_read(z, m.icon)
             except (OSError, KeyError, zipfile.BadZipFile):
                 data = None
             if data:

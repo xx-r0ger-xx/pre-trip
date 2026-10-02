@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1 - 2026-10-01
+
+**Fixes**
+- "File 'manifest.sii' is encrypted, password required for extraction" errors with "protected" mods. Mods that
+  set the zip encryption flag (the game ignores it) now load normally, and a mod file that really can't be read
+  is skipped quietly instead of raising an error.
+- Mod files are no longer kept open after reading their manifest, so disabling, removing or updating a mod
+  isn't blocked by Pre-Trip holding the file.
+- Installing a download zip whose inner .scs can't be unpacked gives a clear message instead of a raw error.
+
 ## 1.0.0 - 2026-10-01
 
 First public release.

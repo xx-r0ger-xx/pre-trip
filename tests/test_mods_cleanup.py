@@ -48,6 +48,40 @@ class ModTests(unittest.TestCase):
             self.assertEqual(m.compat("1.62.0.1"), "outdated")
             self.assertEqual(m.compat(None), "unknown")
 
+    def test_fake_encrypted_flag_is_ignored(self):
+        # "Protected" mods set the zip encryption bit on plain files; zipfile refuses them, the game doesn't.
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "protected.scs"
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("manifest.sii", MANIFEST)
+                z.writestr("desc.txt", "Use HIGH priority.")
+            raw = bytearray(path.read_bytes())
+            for sig, off in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+                i = raw.find(sig)
+                while i != -1:
+                    raw[i + off] |= 0x1
+                    i = raw.find(sig, i + 4)
+            path.write_bytes(raw)
+            m = mods.Mod(core.GAMES["ats"], "local", path, name="protected")
+            mods._apply_manifest(m, mods._reader(path))
+            self.assertEqual(m.author, "Grimes")
+            self.assertEqual(m.description, "Use HIGH priority.")
+
+    def test_unreadable_member_returns_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "locked.scs"
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("manifest.sii", MANIFEST * 20)
+            raw = bytearray(path.read_bytes())
+            start = 30 + len("manifest.sii")
+            raw[start:start + 40] = b"\xff" * 40  # garbage where the data is, like real encryption
+            path.write_bytes(raw)
+            read = mods._reader(path)
+            self.assertIsNone(read("manifest.sii"))
+            m = mods.Mod(core.GAMES["ats"], "local", path, name="locked")
+            mods._apply_manifest(m, read)  # must not raise
+            self.assertEqual(m.name, "locked")
+
     def test_non_zip_scs_is_tolerated(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "hashfs.scs"

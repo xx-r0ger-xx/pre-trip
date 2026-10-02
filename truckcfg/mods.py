@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 import winreg
 import zipfile
+import zlib
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -158,17 +159,32 @@ def _apply_manifest(mod: Mod, read) -> None:
         mod.description = strip_markup(read(desc) or "")
 
 
+def zip_read(z: zipfile.ZipFile, name: str) -> bytes | None:
+    """One member's bytes, or None if it can't be read. Some mod authors set the zip "encrypted" flag on files
+    that aren't really encrypted to stop people unpacking their mods; the game ignores the flag, so we do too.
+    Really encrypted, exotic-compression or damaged members come back as None instead of raising."""
+    try:
+        info = z.getinfo(name)
+        if info.flag_bits & 0x1:
+            info.flag_bits &= ~0x1
+        return z.read(info)
+    except (KeyError, RuntimeError, NotImplementedError, zipfile.BadZipFile, zlib.error, EOFError, OSError, ValueError):
+        return None
+
+
 def _zip_reader(path: Path):
     try:
-        z = zipfile.ZipFile(path)
+        zipfile.ZipFile(path).close()
     except (zipfile.BadZipFile, OSError):
         return None  # HashFS .scs or unreadable: no manifest available
 
     def read(name):
-        try:
-            return z.read(name).decode("utf-8", errors="replace")
-        except KeyError:
+        try:  # opened per read so the mod file isn't left locked (Windows) and can be moved/removed
+            with zipfile.ZipFile(path) as z:
+                data = zip_read(z, name)
+        except (zipfile.BadZipFile, OSError):
             return None
+        return None if data is None else data.decode("utf-8", errors="replace")
     return read
 
 
@@ -351,8 +367,15 @@ def install(game: core.Game, src: Path) -> list[Path]:
     with zipfile.ZipFile(src) as z:
         for member, name in zip(inner, targets):
             dest = out_dir / name
-            with z.open(member) as fin, open(dest, "wb") as fout:
-                shutil.copyfileobj(fin, fout, 1024 * 1024)
+            info = z.getinfo(member)
+            info.flag_bits &= ~0x1  # fake "encrypted" flag, see zip_read
+            try:
+                with z.open(info) as fin, open(dest, "wb") as fout:
+                    shutil.copyfileobj(fin, fout, 1024 * 1024)
+            except (RuntimeError, NotImplementedError, zipfile.BadZipFile, zlib.error, EOFError) as e:
+                dest.unlink(missing_ok=True)
+                raise ValueError(f"Couldn't unpack {name} from {src.name} (password-protected or damaged); "
+                                 f"extract it yourself and install the .scs.") from e
             out.append(dest)
     return out
 
