@@ -268,12 +268,20 @@ def backup(path: Path, game: core.Game) -> Path:
     dest = core.unused_path(BACKUPS / game.key / datetime.now().strftime("%Y-%m-%d_%H%M%S"))
     dest.mkdir(parents=True)
     shutil.copy2(path, dest / path.name)
-    (dest / "profile.id").write_text(path.parent.name, encoding="utf-8")  # which profile this came from
+    (dest / "profile.id").write_text(sii_profile_id(path), encoding="utf-8")  # which profile this came from
     return dest
 
 
+def sii_profile_id(path: Path) -> str:
+    """core.profile_id of the profile a profile.sii belongs to: beside controls.sii in Documents, or a Steam Cloud
+    profile's copy in Steam/userdata/.../remote/profiles/<hex>/."""
+    hexname, parent = path.parent.name, path.parent.parent
+    steam = parent.name == "steam_profiles" or parent.parent.name == "remote"
+    return f"{'steam_profiles' if steam else 'profiles'}/{hexname}"
+
+
 def backup_profile(folder: Path) -> str | None:
-    """The profile folder name a backup was taken from (None for backups made before 1.0.1)."""
+    """The profile id a backup was taken from (None for backups made before 1.0.1)."""
     try:
         return (folder / "profile.id").read_text(encoding="utf-8").strip() or None
     except OSError:

@@ -40,7 +40,7 @@ def _list(path: Path) -> list[str] | None:
     try:
         with zipfile.ZipFile(path) as z:
             return [n.lower() for n in z.namelist() if not n.endswith("/") and _meaningful(n)]
-    except (zipfile.BadZipFile, OSError):
+    except mods.ZIP_ERRORS:
         return None
 
 

@@ -4,9 +4,11 @@ from __future__ import annotations
 import ctypes
 import fnmatch
 import json
+import lzma
 import os
 import re
 import shutil
+import struct
 import threading
 import urllib.parse
 import urllib.request
@@ -15,11 +17,20 @@ import zipfile
 import zlib
 from ctypes import wintypes
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from truckcfg import core
 
 STEAM_APP = {"ets2": "227300", "ats": "270880"}
+try:  # Python 3.14+ can read Zstandard zips; its errors must be caught like the others
+    from compression.zstd import ZstdError as _ZstdError
+except ImportError:
+    class _ZstdError(Exception):
+        pass
+# everything opening or reading a zip can raise on a damaged, exotic or "locked" archive
+ZIP_ERRORS = (zipfile.BadZipFile, OSError, EOFError, RuntimeError, NotImplementedError, ValueError, zlib.error,
+              lzma.LZMAError, _ZstdError)  # ValueError covers UnicodeDecodeError on mis-flagged names
+MAX_TEXT = 1024 * 1024  # manifest.sii / description files bigger than this aren't real ones
 MOD_EXT = {".scs", ".zip"}
 WORKSHOP_CACHE = core.STORE / "workshop_cache.json"
 _CACHE_LOCK = threading.Lock()  # both games' mod lists load at once, on separate threads
@@ -161,39 +172,72 @@ def _apply_manifest(mod: Mod, read) -> None:
         mod.description = strip_markup(read(desc) or "")
 
 
+def really_encrypted(info: zipfile.ZipInfo) -> bool:
+    """A stored member that's 12 bytes bigger than its content carries a real ZipCrypto header; AES is method 99."""
+    return bool(info.flag_bits & 0x1) and (info.compress_type == 99 or
+                                           (info.compress_type == 0 and info.compress_size == info.file_size + 12))
+
+
+def _raw_read(z: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes | None:
+    """Read a member straight from the central directory's offsets, ignoring the local header's name, signature and
+    CRC - other "locker" tricks the game ignores but Python's zipfile rejects. Stored and deflate only."""
+    if info.compress_type not in (0, 8) or not z.filename:
+        return None
+    with open(z.filename, "rb") as f:
+        f.seek(info.header_offset)
+        head = f.read(30)
+        if len(head) < 30:
+            return None
+        n, m = struct.unpack("<HH", head[26:30])
+        f.seek(info.header_offset + 30 + n + m)
+        data = f.read(info.compress_size)
+    if info.compress_type == 8:
+        data = zlib.decompressobj(-15).decompress(data, info.file_size)
+    return data if len(data) == info.file_size else None
+
+
 def zip_read(z: zipfile.ZipFile, name: str, max_size: int | None = None) -> bytes | None:
-    """One member's bytes, or None if it can't be read. Some mod authors set the zip "encrypted" flag on files
-    that aren't really encrypted to stop people unpacking their mods; the game ignores the flag, so we do too.
-    Really encrypted, exotic-compression or damaged members come back as None instead of raising."""
+    """One member's bytes, or None if it can't be read. Some mod authors set the zip "encrypted" flag (or break the
+    local header) on files that aren't really encrypted to stop people unpacking their mods; the game ignores that,
+    so we do too. Really encrypted, exotic-compression or damaged members come back as None instead of raising."""
     try:
         info = z.getinfo(name)
-        if max_size is not None and info.file_size > max_size:
-            return None
-        if info.flag_bits & 0x1:
-            info.flag_bits &= ~0x1
+    except KeyError:
+        return None
+    if (max_size is not None and info.file_size > max_size) or really_encrypted(info):
+        return None
+    info.flag_bits &= ~0x1
+    try:
         return z.read(info)
-    except (KeyError, RuntimeError, NotImplementedError, zipfile.BadZipFile, zlib.error, EOFError, OSError, ValueError):
+    except ZIP_ERRORS:
+        pass
+    try:
+        return _raw_read(z, info)
+    except ZIP_ERRORS:
         return None
 
 
-def _zip_reader(path: Path):
+def _read_manifest(mod: Mod, path: Path) -> None:
+    """Fill mod from the manifest in a folder or zip package. A zip is opened once and closed straight after, so the
+    mod file isn't left locked (Windows) and can be moved or removed. HashFS .scs and broken zips are skipped."""
+    if path.is_dir():
+        _apply_manifest(mod, _dir_reader(path))
+        return
     try:
-        zipfile.ZipFile(path).close()
-    except (zipfile.BadZipFile, OSError):
-        return None  # HashFS .scs or unreadable: no manifest available
-
-    def read(name):
-        try:  # opened per read so the mod file isn't left locked (Windows) and can be moved/removed
-            with zipfile.ZipFile(path) as z:
-                data = zip_read(z, name)
-        except (zipfile.BadZipFile, OSError):
-            return None
-        return None if data is None else data.decode("utf-8", errors="replace")
-    return read
+        with zipfile.ZipFile(path) as z:
+            def read(name):
+                data = zip_read(z, name, MAX_TEXT)
+                return None if data is None else data.decode("utf-8", errors="replace")
+            _apply_manifest(mod, read)
+    except ZIP_ERRORS:
+        return
 
 
 def inside(root: Path, name: str) -> Path | None:
-    """root/name, or None if a mod-supplied name (manifest icon, description file) points outside the mod's folder."""
+    """root/name, or None if a mod-supplied name (manifest icon, description file) points outside the mod's folder.
+    Drive, rooted and network (UNC) names are refused before anything touches the disk or the network."""
+    if not name or PureWindowsPath(name).anchor or name.startswith(("/", "\\")):
+        return None
     try:
         base = root.resolve()
         f = (base / name).resolve()
@@ -206,14 +250,11 @@ def _dir_reader(path: Path):
     def read(name):
         f = inside(path, name)
         try:
-            return f.read_text(encoding="utf-8", errors="replace") if f and f.is_file() else None
+            ok = f and f.is_file() and f.stat().st_size <= MAX_TEXT
+            return f.read_text(encoding="utf-8", errors="replace") if ok else None
         except OSError:
             return None
     return read
-
-
-def _reader(path: Path):
-    return _dir_reader(path) if path.is_dir() else _zip_reader(path)
 
 
 def _size(path: Path) -> int:
@@ -244,8 +285,7 @@ def local_mods(game: core.Game) -> list[Mod]:
             mod = Mod(game, "local", p, enabled, name=_pretty_filename(p.stem), size=_size(p),
                       modified=p.stat().st_mtime)
             mod.package_path = p
-            if read := _reader(p):
-                _apply_manifest(mod, read)
+            _read_manifest(mod, p)
             out.append(mod)
     return out
 
@@ -275,8 +315,8 @@ def workshop_mods(game: core.Game) -> list[Mod]:
                                 pkg = cand
                                 break
             mod.package_path = pkg
-            if pkg and (read := _reader(pkg)):
-                _apply_manifest(mod, read)
+            if pkg:
+                _read_manifest(mod, pkg)
             out.append(mod)
     return out
 
@@ -355,7 +395,7 @@ def inspect_archive(src: Path) -> tuple[str, list[str]]:
     try:
         with zipfile.ZipFile(src) as z:
             names = z.namelist()
-    except (zipfile.BadZipFile, OSError):
+    except ZIP_ERRORS:
         # HashFS .scs (SCS's own archive format) can't be listed, but it's a mod by definition
         return ("mod", [src.name]) if src.suffix.lower() == ".scs" else ("unknown", [])
     if "manifest.sii" in names or any(n.startswith("def/") for n in names):
@@ -377,6 +417,9 @@ def install(game: core.Game, src: Path) -> list[Path]:
     _guard(game)
     have = installed_names(game)
     targets = [Path(n).name for n in inner]
+    if dupes := sorted({n for n in targets if [t.lower() for t in targets].count(n.lower()) > 1}):
+        raise ValueError(f"{src.name} has more than one {', '.join(dupes)} in different folders (e.g. one per game "
+                         "or version). Unzip it and install the right one yourself.")
     if clash := [n for n in targets if n.lower() in have]:
         raise FileExistsError(f"Already installed: {', '.join(clash)}")
     out_dir = mod_dir(game)
@@ -396,6 +439,9 @@ def install(game: core.Game, src: Path) -> list[Path]:
     try:
         with zipfile.ZipFile(src) as z:
             infos = [z.getinfo(m) for m in inner]
+            if locked := [Path(i.filename).name for i in infos if really_encrypted(i)]:
+                raise ValueError(f"{', '.join(locked)} in {src.name} is password-protected. Unzip it with the "
+                                 "password from the mod's page, then install the .scs.")
             need = sum(i.file_size for i in infos)
             free = shutil.disk_usage(out_dir).free
             if need > free - 512 * 1024 * 1024:  # keep half a gig spare; also stops zip bombs filling the disk
@@ -408,7 +454,9 @@ def install(game: core.Game, src: Path) -> list[Path]:
                 try:
                     with z.open(info) as fin, open(dest, "wb") as fout:
                         shutil.copyfileobj(fin, fout, 1024 * 1024)
-                except (RuntimeError, NotImplementedError, zipfile.BadZipFile, zlib.error, EOFError) as e:
+                except ZIP_ERRORS as e:
+                    if isinstance(e, OSError) and not isinstance(e, zipfile.BadZipFile) and e.errno:
+                        raise  # a real disk error (full, locked) - keep its own message
                     raise ValueError(f"Couldn't unpack {name} from {src.name} (password-protected or damaged); "
                                      f"extract it yourself and install the .scs.") from e
     except BaseException:

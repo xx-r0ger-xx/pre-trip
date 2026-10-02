@@ -73,12 +73,14 @@ name, icon or description.
 **A check couldn't run** – if Inspection shows *"Some checks couldn't run"*, the rest of the page is still accurate.
 The message names the check and the reason, and nothing was changed.
 
-**What Cleanup does (and doesn't)** – Cleanup looks only for the duplicate files that cloud sync apps (OneDrive,
-Proton Drive, Dropbox, Google Drive) leave in the game's Documents folder when they clash with the game:
+**What Cleanup does (and doesn't)** – Cleanup looks only for the duplicate files that cloud sync apps and Windows leave in
+the game's Documents folder when they clash with the game, in these three naming styles:
 
-- `controls - Copy.sii`, `controls - Copy (2).sii`
-- `profile (# Name clash 2026-09-29 abc123 #).sii`
-- `config-DESKTOP-ABC123.cfg`
+- `controls - Copy.sii`, `controls - Copy (2).sii` (Windows copies)
+- `profile (# Name clash 2026-09-29 abc123 #).sii` (Proton Drive)
+- `config-DESKTOP-ABC123.cfg` (OneDrive)
+
+Other apps name their conflict copies differently and aren't detected yet.
 
 It skips the `mod`, `mod_disabled`, `cache`, `screenshot` and `music` folders. Matches are **moved, not deleted**, to
 `Documents\TruckSim-Configs\quarantine\<date-time>\`, and a `manifest.json` there lists each file's original

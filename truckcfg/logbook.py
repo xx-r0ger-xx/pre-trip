@@ -35,7 +35,7 @@ def _profile_sii(p: core.Profile) -> Path:
 def _backup_matches(d: Path, p: core.Profile, game: core.Game) -> bool:
     """Load-order backups belong to one profile. Old ones (no id) only count when there's a single profile."""
     owner = loadorder.backup_profile(d)
-    return owner == p.path.name if owner else len(core.find_profiles(game)) == 1
+    return owner == core.profile_id(p) if owner else len(core.find_profiles(game)) == 1
 
 
 # ---------- timeline ----------
@@ -79,6 +79,8 @@ def events(game: core.Game) -> list[dict]:
 def restore(game: core.Game, kind: str, ident: str) -> str:
     if core.is_running(game):
         raise RuntimeError(f"Close {game.title} first - it would overwrite the restored files when it exits.")
+    if kind == "profile" and bisect_state(game):  # the crash finder would write its own order straight back
+        raise RuntimeError("The crash finder is running. Finish or stop it first, then restore.")
     if kind == "snapshot":
         prof = _profile(game)
         snap = next((s for s in core.list_snapshots(prof) if s.path.name == ident), None)
@@ -175,19 +177,28 @@ def bisect_state(game: core.Game) -> dict | None:
         return None
 
 
-def _bisect_profile(game: core.Game, st: dict) -> Path:
-    """The crash finder keeps working on the profile it started on, even if another one is picked meanwhile."""
+def _bisect_profile(game: core.Game, st: dict) -> Path | None:
+    """profile.sii of the profile the crash finder started on, even if another one is picked meanwhile. Found by
+    folder name too, since turning Steam Cloud on or off moves a profile between steam_profiles and profiles. Runs
+    saved by 1.0.0 don't record a profile; 1.0.0 always used the first profile folder, so that's the one."""
+    ps = core.find_profiles(game)
     pid = st.get("profile")
-    p = next((p for p in core.find_profiles(game) if core.profile_id(p) == pid), None) if pid else _profile(game)
-    if not p:
-        raise RuntimeError("The profile the crash finder started on isn't there any more.")
-    return _profile_sii(p)
+    if pid:
+        p = (next((p for p in ps if core.profile_id(p) == pid), None)
+             or next((p for p in ps if p.path.name == pid.rsplit("/", 1)[-1]), None))
+    else:
+        p = ps[0] if ps else None
+    return loadorder.find_profile_sii(p) if p else None
 
 
 def _apply(game: core.Game, st: dict) -> None:
     off = set(st["suspects"]) - set(st["testing"])
     order = [loadorder.Entry(p, d) for p, d in st["original"] if p not in off]
-    loadorder.write_order(_bisect_profile(game, st), game, order)
+    path = _bisect_profile(game, st)
+    if not path:
+        raise RuntimeError("The profile the crash finder started on isn't there any more. Stop the crash finder "
+                           "to clear it.")
+    loadorder.write_order(path, game, order)
     _state_path(game).parent.mkdir(parents=True, exist_ok=True)
     _state_path(game).write_text(json.dumps(st, indent=1), encoding="utf-8")
 
@@ -228,13 +239,17 @@ def bisect_report(game: core.Game, crashed: bool) -> dict:
     return st
 
 
-def bisect_stop(game: core.Game) -> None:
+def bisect_stop(game: core.Game) -> bool:
+    """Put the original load order back and end the run. Returns False if the profile it ran on is gone - the run
+    is still cleared, so the crash finder can never get stuck."""
     st = bisect_state(game)
     if not st:
-        return
-    order = [loadorder.Entry(p, d) for p, d in st["original"]]
-    loadorder.write_order(_bisect_profile(game, st), game, order)
+        return True
+    path = _bisect_profile(game, st)
+    if path:
+        loadorder.write_order(path, game, [loadorder.Entry(p, d) for p, d in st["original"]])
     _state_path(game).unlink(missing_ok=True)
+    return path is not None
 
 
 # ---------- loadouts ----------

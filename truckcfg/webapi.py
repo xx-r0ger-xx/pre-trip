@@ -146,7 +146,7 @@ class Api:
                 "checks": [{"id": "inspect-error", "fp": "", "sev": "crit", "ack": False, "acked": False, "action": None,
                             "title": f"Couldn't inspect {GAMES[k].title}",
                             "detail": f"{type(e).__name__}: {e}. Nothing was changed."}],
-                "version": None, "active": 0, "installed": 0, "reshade": True, "overlaps": []}
+                "version": None, "active": 0, "installed": 0, "reshade": None, "overlaps": []}
 
     def _inspect_game(self, k: str, staged: dict) -> dict:
         g = GAMES[k]
@@ -160,17 +160,19 @@ class Api:
                 errors.append(f"{what} ({e})")
                 return default
 
-        ms = self._mod_list(k, fresh=True)
+        ms = safe("mod list", lambda: self._mod_list(k, fresh=True), None)
+        mods_ok, ms = ms is not None, ms or []
         by = {m.package: m for m in ms}
-        order = self._order(k)
+        order = safe("load order", lambda: self._order(k), [])
         unsaved = k in staged and [e.package for e in order] != staged[k]
         if unsaved:
             saved = {e.package: e for e in order}
             order = [saved.get(p) or loadorder.Entry(p, by[p].display if p in by else p) for p in staged[k]]
-        ver = mods.game_version(g)
+        ver = safe("game version", lambda: mods.game_version(g), None)
         active = [by.get(e.package) for e in order]
         outdated = [m.name for m in active if m and m.compat(ver) == "outdated"]
-        missing = [e.display for e, m in zip(order, active) if m is None]
+        # without a mod list every active mod would look "not installed" - say the list failed instead
+        missing = [e.display for e, m in zip(order, active) if m is None] if mods_ok else []
         ov = safe("file overlaps", lambda: conflicts.overlaps([e.package for e in order],
                                                               conflicts.file_index([m for m in active if m])), {})
         pairs = [(a, o) for a, lst in ov.items() for o in lst if o["wins"]]
@@ -186,7 +188,7 @@ class Api:
         crash_age = None
         if crash["time"]:
             crash_age = safe("crash log", lambda: (datetime.now() - datetime.fromisoformat(crash["time"])).days, None)
-        rs = safe("ReShade", lambda: graphics.reshade(g), {"installed": True})
+        rs = safe("ReShade", lambda: graphics.reshade(g), {"installed": None})  # None = couldn't tell
         bis = safe("crash finder", lambda: logbook.bisect_state(g), None)
 
         drift_rows = rows if p and snaps else []
@@ -239,7 +241,7 @@ class Api:
         for level, msg in (safe("profile health", lambda: cleanup.profile_health(p), []) if p else []):
             if level == "bad":
                 add(id="profile-health", fp=msg, sev="crit", title="Profile is damaged", detail=msg, ack=False)
-        if not rs["installed"]:
+        if rs["installed"] is False:
             add(id="reshade", fp="missing", sev="info", title="ReShade isn't installed",
                 detail="Optional. Sharpening and colour presets live in ATS/ETS2 Sync → ReShade.",
                 action={"kind": "view", "view": "twin", "label": "Open"} if len(owned()) > 1 else None)
@@ -507,8 +509,9 @@ class Api:
         return logbook.bisect_report(_g(key), crashed)
 
     def bisect_stop(self, key: str) -> str:
-        logbook.bisect_stop(_g(key))
-        return "Crash finder stopped. Your original load order is back."
+        if logbook.bisect_stop(_g(key)):
+            return "Crash finder stopped. Your original load order is back."
+        return "Crash finder cleared. The profile it was testing isn't there any more, so there was nothing to put back."
 
     # ---------- installing and removing mods ----------
     @staticmethod
@@ -584,12 +587,17 @@ class Api:
         active = [e.package for e in self._order(key)]
         if package in active:
             self.save_order(key, [x for x in active if x != package])
-        if m.source == "workshop":
-            steamugc.unsubscribe(_g(key), [m.workshop_id])
-            msg = f"Unsubscribed from “{m.name}”. Steam removes the files."
-        else:
-            mods.remove(m)
-            msg = f"“{m.name}” moved to the Recycle Bin."
+        try:
+            if m.source == "workshop":
+                steamugc.unsubscribe(_g(key), [m.workshop_id])
+                msg = f"Unsubscribed from “{m.name}”. Steam removes the files."
+            else:
+                mods.remove(m)
+                msg = f"“{m.name}” moved to the Recycle Bin."
+        except Exception:
+            if package in active:  # removal failed: the mod is still there, so it goes back in the load order
+                self.save_order(key, active)
+            raise
         self._mods.pop(key, None)
         return msg
 

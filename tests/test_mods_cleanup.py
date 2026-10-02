@@ -40,7 +40,7 @@ class ModTests(unittest.TestCase):
                 z.writestr("manifest.sii", MANIFEST)
                 z.writestr("desc.txt", "[red]Important![normal] Use HIGH priority.")
             m = mods.Mod(core.GAMES["ats"], "local", path, name="rain")
-            mods._apply_manifest(m, mods._reader(path))
+            mods._read_manifest(m, path)
             self.assertEqual((m.name, m.version, m.author), ("Realistic Rain Reflections v2.5", "2.5", "Grimes"))
             self.assertEqual(m.categories, ["graphics", "weather"])
             self.assertEqual(m.description, "Important! Use HIGH priority.")
@@ -63,7 +63,7 @@ class ModTests(unittest.TestCase):
                     i = raw.find(sig, i + 4)
             path.write_bytes(raw)
             m = mods.Mod(core.GAMES["ats"], "local", path, name="protected")
-            mods._apply_manifest(m, mods._reader(path))
+            mods._read_manifest(m, path)
             self.assertEqual(m.author, "Grimes")
             self.assertEqual(m.description, "Use HIGH priority.")
 
@@ -76,17 +76,19 @@ class ModTests(unittest.TestCase):
             start = 30 + len("manifest.sii")
             raw[start:start + 40] = b"\xff" * 40  # garbage where the data is, like real encryption
             path.write_bytes(raw)
-            read = mods._reader(path)
-            self.assertIsNone(read("manifest.sii"))
+            with zipfile.ZipFile(path) as z:
+                self.assertIsNone(mods.zip_read(z, "manifest.sii"))
             m = mods.Mod(core.GAMES["ats"], "local", path, name="locked")
-            mods._apply_manifest(m, read)  # must not raise
+            mods._read_manifest(m, path)  # must not raise
             self.assertEqual(m.name, "locked")
 
     def test_non_zip_scs_is_tolerated(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "hashfs.scs"
             path.write_bytes(b"SCS#\x01\x00\x00\x00" + b"\x00" * 64)
-            self.assertIsNone(mods._reader(path))
+            m = mods.Mod(core.GAMES["ats"], "local", path, name="hashfs")
+            mods._read_manifest(m, path)  # must not raise
+            self.assertEqual(m.name, "hashfs")
 
     def test_universal_package_is_compatible(self):
         m = mods.Mod(core.GAMES["ats"], "workshop", Path("x"), compatible=["1.40.*"], universal=True)

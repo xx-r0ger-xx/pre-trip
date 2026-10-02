@@ -3,20 +3,24 @@
 ## 1.0.1 - 2026-10-02
 
 **New**
-- Profile picker. With more than one ETS2/ATS profile, Pre-Trip now uses the one you played most recently (it used
-  to take whichever profile folder sorted first) and shows a dropdown in the Inspection header to switch. Your
-  choice is remembered.
+- Profile picker. With more than one ETS2/ATS profile, Pre-Trip now uses the one you played most recently when it
+  starts (it used to take whichever profile folder sorted first) and sticks with it until you restart or pick
+  another from the dropdown in the Inspection header. Your pick is remembered.
 
 **Safety fixes**
 - Load-order backups are tied to the profile they came from. Restoring one puts back only the mod list, never the
   rest of profile.sii, and a backup from another profile can't be restored over this one.
-- The crash finder keeps working on the profile it started on, can't be started twice (which would have lost
-  your original load order), and blocks saving load orders until you finish or stop it.
+- The crash finder keeps working on the profile it started on (even if Steam Cloud is switched on or off), can't
+  be started twice (which would have lost your original load order), and blocks saving or restoring load orders
+  until you finish or stop it. It can always be stopped, even if its profile has gone. A run started in 1.0.0
+  finishes on the profile 1.0.0 used.
 - If Windows can't say whether a game is running, Pre-Trip now refuses to write instead of assuming it's closed.
 - Removing a mod that's too big for the Recycle Bin asks first instead of deleting it for good.
 - Installing is all or nothing: a failed copy or a bundle with one bad .scs leaves nothing half-installed, and
   bundles that wouldn't fit on the disk are refused up front.
-- Removing an active mod takes it out of the load order first, so a failed removal never leaves a dangling entry.
+- Removing an active mod takes it out of the load order first, and puts it back if the removal fails.
+- Installing a download zip that has the same .scs in two folders (one per game or version) is refused instead of
+  installing whichever came last, and a really password-protected one is refused before anything is written.
 - Cleanup records every file it moved even if a later move fails, and two runs in the same second no longer share
   a quarantine folder.
 
@@ -28,6 +32,11 @@
 - A loose (unpacked) mod's manifest can't point Pre-Trip at files outside the mod's folder, and oversized
   preview images are skipped.
 - Mod lists for both games loading at once no longer race on the cache files.
+- More "protected" mods are read: ones with a broken local zip header, LZMA/Zstandard compression or an unusual zip
+  version are read or skipped quietly, never taking down the whole mod list.
+- A mod's manifest can't make Pre-Trip contact a network share.
+- Profile names with CJK spaces, emoji or other unusual characters display correctly.
+- Steam and local profiles with the same name keep separate snapshots and backups.
 - Cleanup says "No sync-conflict leftovers" instead of "All clean", and the README has a Troubleshooting section
   for protected mods and what Cleanup does.
 - "File 'manifest.sii' is encrypted, password required for extraction" errors with "protected" mods. Mods that

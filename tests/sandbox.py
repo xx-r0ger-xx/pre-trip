@@ -136,6 +136,7 @@ class Sandbox:
         self._stack = ExitStack()
         p = lambda target, value: self._stack.enter_context(mock.patch(target, value))  # noqa: E731
         p("truckcfg.core.documents_dir", lambda: self.docs)
+        p("truckcfg.core._SESSION", {})  # each sandbox starts like a fresh app launch
         p("truckcfg.mods.steam_libraries", lambda: [self.steam])
         p("truckcfg.core.is_running", lambda game: game.key in self.running)
         p("truckcfg.mods.fetch_workshop_details", lambda ids: {})

@@ -281,7 +281,7 @@ async function renderPretrip(rescan = false) {
       v.innerHTML = `<section class="panel" style="padding:28px 24px;text-align:center"><div class="disp" style="font-size:20px">Inspection couldn't finish</div>
         <div style="color:var(--muted);margin:8px 0 16px">${esc(String(e?.message || e))}. Nothing was changed.</div><button class="btn primary" id="retry">${I.gauge}Try again</button></section>`;
       $("#retry").onclick = () => renderPretrip(true);
-      return;
+      return false;
     }
     S.data.overview = ov; S.data.inspect = ins;
     if (S.view !== "pretrip") return;
@@ -309,7 +309,7 @@ async function renderPretrip(rescan = false) {
           <div class="grow"><h2 class="disp">${GAME[g].title}</h2><div class="meta">${o.version ? "v" + esc(o.version) : "version unknown until next launch"} · ${o.profiles?.length > 1
             ? `<select class="profile-pick" data-profile="${g}" data-tip="Which ${GAME[g].short} profile Pre-Trip reads and changes">${o.profiles.map(p =>
                 `<option value="${esc(p.id)}" ${p.selected ? "selected" : ""}>${esc(p.label)}</option>`).join("")}</select>`
-            : esc(o.profile || "no profile")} · ${d.active} of ${d.installed} mods active · ReShade ${d.reshade ? "on" : "off"}</div></div>
+            : esc(o.profile || "no profile")} · ${d.active} of ${d.installed} mods active · ReShade ${d.reshade == null ? "unknown" : d.reshade ? "on" : "off"}</div></div>
           <button class="btn sm" data-launch="${g}" ${o.running ? "disabled" : ""}>${I.play}${o.running ? "Running" : "Launch"}</button></div>
         <div class="gauges">${Object.entries(d.gauges).map(([k, x]) => gaugeFor(k, x, g)).join("")}</div>
         <div class="checks">${(() => {
@@ -330,7 +330,7 @@ async function renderPretrip(rescan = false) {
   }));
   $("#rescan").onclick = async () => {
     $$(".cluster", v).forEach(c => { const s = document.createElement("div"); s.className = "sweep"; c.append(s) });
-    await renderPretrip(true); toast("Inspection complete.", "ok");
+    if (await renderPretrip(true) !== false) toast("Inspection complete.", "ok");
   };
   $$("[data-profile]", v).forEach(sel => sel.onchange = async () => {
     const g = sel.dataset.profile, prev = ov[g].profiles.find(p => p.selected)?.id;
@@ -338,7 +338,7 @@ async function renderPretrip(rescan = false) {
       target: `${GAME[g].short}'s game files aren't touched by switching.`, ok: "Switch" })) { sel.value = prev; return }
     try { toast(await api("select_profile", g, sel.value), "ok") } catch (e) { sel.value = prev; return }
     S.staged[g] = null; S.ov[g] = null; S.data.mods[g] = null; S.data.logbook[g] = null; S.data.loadouts[g] = null; S.data.twin = null;
-    renderPretrip(true);
+    S.data.inspect = null; render();  // full render: also clears the unsaved-order dock
   });
   v.onclick = async e => {
     const gz = e.target.closest("[data-gauge]");

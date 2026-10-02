@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import unicodedata
 import winreg
 from dataclasses import dataclass
 from datetime import datetime
@@ -42,7 +43,8 @@ class Profile:
             name = bytes.fromhex(self.path.name).decode("utf-8")
         except ValueError:
             return self.path.name
-        return name if name.isprintable() and name.strip() else self.path.name
+        # control characters mean it isn't really a name; anything else (CJK spaces, emoji, ZWJ) is shown as-is
+        return self.path.name if not name.strip() or any(unicodedata.category(c) == "Cc" for c in name) else name
 
     @property
     def label(self) -> str:
@@ -90,13 +92,22 @@ def _selected() -> dict:
         return {}
 
 
+_SESSION: dict[str, str] = {}  # game key -> profile id chosen automatically, held until the app restarts
+
+
 def active_profile(game: Game) -> Profile | None:
-    """The profile every read and write uses: the one picked in the app, else the one played most recently."""
+    """The profile every read and write uses: the one picked in the app, else the one played most recently when
+    Pre-Trip first looked. That automatic choice is held for the session, so what the screen shows and where a save
+    goes can't drift apart if another profile is played while Pre-Trip is open."""
     ps = find_profiles(game)
     if not ps:
         return None
-    want = _selected().get(game.key)
-    return next((p for p in ps if profile_id(p) == want), None) or max(ps, key=last_played)
+    for want in (_selected().get(game.key), _SESSION.get(game.key)):
+        if p := next((p for p in ps if profile_id(p) == want), None):
+            return p
+    p = max(ps, key=last_played)
+    _SESSION[game.key] = profile_id(p)
+    return p
 
 
 def select_profile(game: Game, pid: str) -> Profile:
@@ -132,13 +143,13 @@ def is_running(game: Game) -> bool:
     """Whether the game is open. Guards every write, so if Windows can't tell us, that's an error - never "not running"."""
     try:
         r = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {game.exe}", "/NH"], capture_output=True, text=True,
-                           timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+                           errors="replace", timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
     except (OSError, subprocess.SubprocessError) as e:
         raise RuntimeError(f"Couldn't check whether {game.title} is running ({e}). Nothing was changed.") from e
-    if r.returncode != 0:
+    if r.returncode != 0 or r.stdout is None:
         raise RuntimeError(f"Couldn't check whether {game.title} is running (tasklist exit {r.returncode}). "
                            "Nothing was changed.")
-    return game.exe.lower() in (r.stdout or "").lower()
+    return game.exe.lower() in r.stdout.lower()
 
 
 def seems_running(game: Game) -> bool:
@@ -282,7 +293,12 @@ class Snapshot:
 
 
 def snapshot_root(profile: Profile) -> Path:
-    return STORE / profile.game.key / profile.path.name
+    """Snapshots live under the profile's folder name. A local profile that shares its name with a Steam one gets
+    its own "-local" folder so the two never see each other's snapshots."""
+    hexname = profile.path.name
+    twin = profile.path.parent.parent / "steam_profiles" / hexname / "controls.sii"
+    local = profile.path.parent.name == "profiles"
+    return STORE / profile.game.key / (f"{hexname}-local" if local and twin.exists() else hexname)
 
 
 def take_snapshot(profile: Profile, label: str = "") -> Snapshot:
@@ -318,7 +334,7 @@ def list_snapshots(profile: Profile) -> list[Snapshot]:
             snaps.append((Snapshot(d, meta), mf.stat().st_mtime_ns))
     # "created" has one-second resolution and a sync takes before+after snapshots in the same second: break ties by
     # when meta.json was written (last), so snaps[0] is really the newest and drift isn't measured from "before"
-    return [s for s, _ in sorted(snaps, key=lambda x: (x[0].created, x[1]), reverse=True)]
+    return [s for s, _ in sorted(snaps, key=lambda x: (str(x[0].created), x[1]), reverse=True)]
 
 
 def diff_snapshot(snap: Snapshot, profile: Profile) -> tuple[list[DiffRow], list[str]]:
