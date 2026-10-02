@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import threading
 import urllib.parse
 import urllib.request
 import winreg
@@ -21,6 +22,7 @@ from truckcfg import core
 STEAM_APP = {"ets2": "227300", "ats": "270880"}
 MOD_EXT = {".scs", ".zip"}
 WORKSHOP_CACHE = core.STORE / "workshop_cache.json"
+_CACHE_LOCK = threading.Lock()  # both games' mod lists load at once, on separate threads
 
 
 @dataclass
@@ -159,12 +161,14 @@ def _apply_manifest(mod: Mod, read) -> None:
         mod.description = strip_markup(read(desc) or "")
 
 
-def zip_read(z: zipfile.ZipFile, name: str) -> bytes | None:
+def zip_read(z: zipfile.ZipFile, name: str, max_size: int | None = None) -> bytes | None:
     """One member's bytes, or None if it can't be read. Some mod authors set the zip "encrypted" flag on files
     that aren't really encrypted to stop people unpacking their mods; the game ignores the flag, so we do too.
     Really encrypted, exotic-compression or damaged members come back as None instead of raising."""
     try:
         info = z.getinfo(name)
+        if max_size is not None and info.file_size > max_size:
+            return None
         if info.flag_bits & 0x1:
             info.flag_bits &= ~0x1
         return z.read(info)
@@ -188,10 +192,23 @@ def _zip_reader(path: Path):
     return read
 
 
+def inside(root: Path, name: str) -> Path | None:
+    """root/name, or None if a mod-supplied name (manifest icon, description file) points outside the mod's folder."""
+    try:
+        base = root.resolve()
+        f = (base / name).resolve()
+    except (OSError, ValueError):
+        return None
+    return f if f.is_relative_to(base) and f != base else None
+
+
 def _dir_reader(path: Path):
     def read(name):
-        f = path / name
-        return f.read_text(encoding="utf-8", errors="replace") if f.is_file() else None
+        f = inside(path, name)
+        try:
+            return f.read_text(encoding="utf-8", errors="replace") if f and f.is_file() else None
+        except OSError:
+            return None
     return read
 
 
@@ -279,6 +296,11 @@ def load_workshop_cache() -> dict:
 
 def fetch_workshop_details(ids: list[str]) -> dict:
     """Title/author info for Workshop ids. Merges into the on-disk cache and returns it."""
+    with _CACHE_LOCK:
+        return _fetch_workshop_details(ids)
+
+
+def _fetch_workshop_details(ids: list[str]) -> dict:
     cache = load_workshop_cache()
     todo = [i for i in ids if i not in cache]
     if todo:
@@ -293,7 +315,7 @@ def fetch_workshop_details(ids: list[str]) -> dict:
                 cache[d["publishedfileid"]] = {"title": d.get("title", ""),
                                                "time_updated": d.get("time_updated", 0)}
         WORKSHOP_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        WORKSHOP_CACHE.write_text(json.dumps(cache, indent=1), encoding="utf-8")
+        core.write_text_atomic(WORKSHOP_CACHE, json.dumps(cache, indent=1))
     return cache
 
 
@@ -361,22 +383,38 @@ def install(game: core.Game, src: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     if kind == "mod":
         dest = out_dir / src.name
-        (shutil.copytree if src.is_dir() else shutil.copy2)(src, dest)
+        try:
+            (shutil.copytree if src.is_dir() else shutil.copy2)(src, dest)
+        except BaseException:  # a half-copied mod would still be loaded by the game: leave nothing behind
+            if dest.is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+            else:
+                dest.unlink(missing_ok=True)
+            raise
         return [dest]
     out = []
-    with zipfile.ZipFile(src) as z:
-        for member, name in zip(inner, targets):
-            dest = out_dir / name
-            info = z.getinfo(member)
-            info.flag_bits &= ~0x1  # fake "encrypted" flag, see zip_read
-            try:
-                with z.open(info) as fin, open(dest, "wb") as fout:
-                    shutil.copyfileobj(fin, fout, 1024 * 1024)
-            except (RuntimeError, NotImplementedError, zipfile.BadZipFile, zlib.error, EOFError) as e:
-                dest.unlink(missing_ok=True)
-                raise ValueError(f"Couldn't unpack {name} from {src.name} (password-protected or damaged); "
-                                 f"extract it yourself and install the .scs.") from e
-            out.append(dest)
+    try:
+        with zipfile.ZipFile(src) as z:
+            infos = [z.getinfo(m) for m in inner]
+            need = sum(i.file_size for i in infos)
+            free = shutil.disk_usage(out_dir).free
+            if need > free - 512 * 1024 * 1024:  # keep half a gig spare; also stops zip bombs filling the disk
+                raise ValueError(f"Not enough free disk space to unpack {src.name} "
+                                 f"({need / 2**30:.1f} GB needed, {free / 2**30:.1f} GB free).")
+            for info, name in zip(infos, targets):
+                dest = out_dir / name
+                info.flag_bits &= ~0x1  # fake "encrypted" flag, see zip_read
+                out.append(dest)
+                try:
+                    with z.open(info) as fin, open(dest, "wb") as fout:
+                        shutil.copyfileobj(fin, fout, 1024 * 1024)
+                except (RuntimeError, NotImplementedError, zipfile.BadZipFile, zlib.error, EOFError) as e:
+                    raise ValueError(f"Couldn't unpack {name} from {src.name} (password-protected or damaged); "
+                                     f"extract it yourself and install the .scs.") from e
+    except BaseException:
+        for f in out:  # all or nothing: never leave half a bundle in the mod folder
+            f.unlink(missing_ok=True)
+        raise
     return out
 
 
@@ -458,10 +496,13 @@ class _SHFILEOPSTRUCTW(ctypes.Structure):
 
 
 def recycle(path: Path) -> None:
-    """Send to the Recycle Bin (undoable) rather than deleting."""
+    """Send to the Recycle Bin (undoable) rather than deleting. If Windows can't recycle it (bigger than the bin,
+    or a drive without one) it asks first instead of silently deleting for good (FOF_WANTNUKEWARNING)."""
     FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
+    FOF_WANTNUKEWARNING = 0x4000
     op = _SHFILEOPSTRUCTW(None, FO_DELETE, str(path) + "\0", None,
-                          FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI, False, None, None)
+                          FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI | FOF_WANTNUKEWARNING,
+                          False, None, None)
     rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
     if rc or op.fAnyOperationsAborted:
         raise OSError(f"Couldn't move {path.name} to the Recycle Bin (code {rc}).")

@@ -16,6 +16,7 @@ from pathlib import Path
 from truckcfg import cleanup, conflicts, core, graphics, loadorder, logbook, mods, steamugc
 
 GAMES = core.GAMES
+_MAX_ICON = 20 * 1024 * 1024  # preview images bigger than this aren't icons; don't base64 them into the page
 _MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 
 
@@ -24,8 +25,7 @@ def _g(key: str) -> core.Game:
 
 
 def _profile(game: core.Game) -> core.Profile | None:
-    ps = core.find_profiles(game)
-    return ps[0] if ps else None
+    return core.active_profile(game)
 
 
 def owned() -> list[str]:
@@ -101,7 +101,19 @@ class Api:
                     "profile": _profile(g) is not None} for k, g in GAMES.items()}
 
     def running(self) -> dict:
-        return {k: core.is_running(GAMES[k]) for k in owned()}
+        return {k: core.seems_running(GAMES[k]) for k in owned()}
+
+    def profiles(self, key: str) -> list[dict]:
+        g = _g(key)
+        cur = _profile(g)
+        return [{"id": core.profile_id(p), "name": p.name, "label": p.label,
+                 "selected": cur is not None and p.path == cur.path} for p in core.find_profiles(g)]
+
+    def select_profile(self, key: str, pid: str) -> str:
+        if logbook.bisect_state(_g(key)):
+            raise RuntimeError("Finish or stop the crash finder before switching profiles.")
+        p = core.select_profile(_g(key), pid)
+        return f"Using {p.label} for {_g(key).title}."
 
     def overview(self) -> dict:
         out = {}
@@ -109,8 +121,9 @@ class Api:
             g = GAMES[k]
             p = _profile(g)
             out[k] = {"key": k, "title": g.title, "version": mods.game_version(g), "profile": p.name if p else None,
+                      "profiles": self.profiles(k),
                       "controls_changed": core.controls_changed(p).isoformat(timespec="seconds") if p else None,
-                      "running": core.is_running(g)}
+                      "running": core.seems_running(g)}
         return out
 
     # ---------- inspection ----------
@@ -119,114 +132,142 @@ class Api:
         staged = staged or {}
         res = {}
         for k in owned():
-            g = GAMES[k]
-            checks = []
-            ms = self._mod_list(k, fresh=True)
-            by = {m.package: m for m in ms}
-            order = self._order(k)
-            unsaved = k in staged and [e.package for e in order] != staged[k]
-            if unsaved:
-                saved = {e.package: e for e in order}
-                order = [saved.get(p) or loadorder.Entry(p, by[p].display if p in by else p) for p in staged[k]]
-            ver = mods.game_version(g)
-            active = [by.get(e.package) for e in order]
-            outdated = [m.name for m in active if m and m.compat(ver) == "outdated"]
-            missing = [e.display for e, m in zip(order, active) if m is None]
-            idx = conflicts.file_index([m for m in active if m])
-            ov = conflicts.overlaps([e.package for e in order], idx)
-            pairs = [(a, o) for a, lst in ov.items() for o in lst if o["wins"]]
-            rec = loadorder.recommended_order(order, lambda e: by[e.package].categories if e.package in by else [],
-                                              lambda e: by[e.package].description if e.package in by else "")
-            moves = sum(a != b for a, b in zip(rec, order))
-            p = _profile(g)
-            drift, rows, snaps = 0, [], []
-            if p and (snaps := core.list_snapshots(p)):
-                rows, _ = core.diff_snapshot(snaps[0], p)
-                drift = len([r for r in rows if r.mapped])
-            crash = logbook.crash_report(g)
-            crash_age = None
-            if crash["time"]:
-                crash_age = (datetime.now() - datetime.fromisoformat(crash["time"])).days
-            rs = graphics.reshade(g)
-            bis = logbook.bisect_state(g)
-
-            drift_rows = rows if p and snaps else []
-            # every check: id (stable), fp (fingerprint of what it's about - an acknowledgement only holds while
-            # fp is unchanged, so a new crash or more drift brings it back), and one clear next step
-            add = lambda **c: checks.append({"detail": "", "action": None, "ack": True, **c})
-            if unsaved:
-                add(id="unsaved", fp="", sev="warn", ack=False, title="Unsaved load order changes in the Studio",
-                    detail="The game still has the old order. Inspection is checking your Studio changes as if they were saved.",
-                    action={"kind": "view", "view": "studio", "label": "Save or discard"})
-            if not p:
-                add(id="profile", fp="none", sev="warn", title="No profile yet", ack=False,
-                    detail=f"Launch {g.title} once and create a profile. Controls and load order show up here after that.")
-            if missing:
-                add(id="missing", fp=_fp(missing), sev="crit", title=f"{len(missing)} active mod(s) aren't installed",
-                    detail=", ".join(missing[:4]), action={"kind": "view", "view": "studio", "label": "Open Studio"})
-            if outdated:
-                add(id="outdated", fp=_fp(outdated + [ver or ""]), sev="warn",
-                    title=f"{len(outdated)} active mod(s) not marked for {mods.short_version(ver)}",
-                    detail=", ".join(outdated[:4]), action={"kind": "view", "view": "studio", "label": "Open Studio"})
-            if moves:
-                add(id="order", fp=_fp([e.package for e in order]), sev="warn",
-                    title=f"Load order doesn't follow the mod authors' notes ({moves} moves)",
-                    detail="Auto-sort proposes the fix. You review it, then save.",
-                    action={"kind": "autosort", "label": "Fix with auto-sort"})
-            for a, o in pairs[:3]:
-                add(id=f"overlap:{a}:{o['other']}", fp=str(o["count"]), sev="info",
-                    title=f"{self._name(by, a)} overrides {o['count']} files of {self._name(by, o['other'])}",
-                    detail="Normal for add-ons. Only change it if the mod you want isn't working.",
-                    action={"kind": "mod", "package": a, "label": "See files"})
-            if drift:
-                add(id="drift", fp=_fp([snaps[0].path.name] + [f"{r.name}={r.right}" for r in drift_rows if r.mapped]),
-                    sev="warn", title=f"{drift} binding(s) changed since the last snapshot",
-                    detail="Review what changed, then keep the new bindings or restore the old ones.",
-                    action={"kind": "drift", "label": "Review changes"}, ack=False)
-            if crash["present"] and crash_age is not None and crash_age <= 14:
-                add(id="crash", fp=crash["time"], sev="crit" if crash_age <= 2 else "warn",
-                    title=f"Crashed {self._ago(crash['time'])}", detail=crash["summary"],
-                    action={"kind": "view", "view": "logbook", "label": "Crash details"})
-            if bis:
-                add(id="bisect", fp="running", sev="warn", title=f"Crash finder is running (round {bis['round']})",
-                    detail="Some mods are switched off until you finish or stop it.", ack=False,
-                    action={"kind": "view", "view": "logbook", "label": "Continue"})
-            clutter = cleanup.find_clutter(g)
-            if clutter:
-                add(id="clutter", fp=_fp(sorted(c.rel for c in clutter)), sev="warn",
-                    title=f"{len(clutter)} sync-conflict leftover file(s) in the game folder",
-                    detail="Copies like \"controls - Copy.sii\" or \"(# Name clash …)\" left by cloud sync. They can confuse the game.",
-                    action={"kind": "view", "view": "cleanup", "label": "Clean up"})
-            for level, msg in (cleanup.profile_health(p) if p else []):
-                if level == "bad":
-                    add(id="profile-health", fp=msg, sev="crit", title="Profile is damaged", detail=msg, ack=False)
-            if not rs["installed"]:
-                add(id="reshade", fp="missing", sev="info", title="ReShade isn't installed",
-                    detail="Optional. Sharpening and colour presets live in ATS/ETS2 Sync → ReShade.",
-                    action={"kind": "view", "view": "twin", "label": "Open"} if len(owned()) > 1 else None)
-            acks = _acks().get(k, {})
-            for c in checks:
-                c["acked"] = c["ack"] and acks.get(c["id"]) == c["fp"]
-            n_active = len([m for m in active if m])
-            res[k] = {
-                "gauges": {
-                    "mods": {"value": n_active - len(outdated), "max": max(len(order), 1), "label": "Mods current",
-                             "text": f"{n_active - len(outdated)}/{len(order)}"},
-                    "conflicts": {"value": len(pairs), "max": max(len(pairs), 6), "label": "File overlaps",
-                                  "text": str(len(pairs))},
-                    "drift": {"value": drift, "max": max(drift, 10), "label": "Binding drift", "text": str(drift)},
-                    "crash": {"value": min(crash_age, 30) if crash_age is not None else 30, "max": 30,
-                              "label": "Days since crash",
-                              "text": str(crash_age) if crash_age is not None else "—"},
-                },
-                "checks": checks or [{"id": "ok", "sev": "ok", "title": "All clear", "detail": "Nothing needs attention.",
-                                      "action": None, "ack": False, "acked": False}], "version": ver, "active": len(order), "installed": len(ms),
-                "reshade": rs["installed"],
-                "overlaps": [{"winner": a, "winner_name": self._name(by, a), "loser": o["other"],
-                              "loser_name": self._name(by, o["other"]), "count": o["count"], "sample": o["sample"][:3]}
-                             for a, o in sorted(pairs, key=lambda x: -x[1]["count"])],
-            }
+            try:
+                res[k] = self._inspect_game(k, staged)
+            except Exception as e:  # noqa: BLE001 - one game's failure must not blank the whole page
+                res[k] = self._inspect_failed(k, e)
         return res
+
+    @staticmethod
+    def _inspect_failed(k: str, e: Exception) -> dict:
+        zero = lambda label: {"value": 0, "max": 1, "label": label, "text": "—"}
+        return {"gauges": {"mods": zero("Mods current"), "conflicts": zero("File overlaps"),
+                           "drift": zero("Binding drift"), "crash": zero("Days since crash")},
+                "checks": [{"id": "inspect-error", "fp": "", "sev": "crit", "ack": False, "acked": False, "action": None,
+                            "title": f"Couldn't inspect {GAMES[k].title}",
+                            "detail": f"{type(e).__name__}: {e}. Nothing was changed."}],
+                "version": None, "active": 0, "installed": 0, "reshade": True, "overlaps": []}
+
+    def _inspect_game(self, k: str, staged: dict) -> dict:
+        g = GAMES[k]
+        checks, errors = [], []
+
+        def safe(what, fn, default):
+            """Run one check; if it fails, note it and carry on with the rest."""
+            try:
+                return fn()
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{what} ({e})")
+                return default
+
+        ms = self._mod_list(k, fresh=True)
+        by = {m.package: m for m in ms}
+        order = self._order(k)
+        unsaved = k in staged and [e.package for e in order] != staged[k]
+        if unsaved:
+            saved = {e.package: e for e in order}
+            order = [saved.get(p) or loadorder.Entry(p, by[p].display if p in by else p) for p in staged[k]]
+        ver = mods.game_version(g)
+        active = [by.get(e.package) for e in order]
+        outdated = [m.name for m in active if m and m.compat(ver) == "outdated"]
+        missing = [e.display for e, m in zip(order, active) if m is None]
+        ov = safe("file overlaps", lambda: conflicts.overlaps([e.package for e in order],
+                                                              conflicts.file_index([m for m in active if m])), {})
+        pairs = [(a, o) for a, lst in ov.items() for o in lst if o["wins"]]
+        rec = loadorder.recommended_order(order, lambda e: by[e.package].categories if e.package in by else [],
+                                          lambda e: by[e.package].description if e.package in by else "")
+        moves = sum(a != b for a, b in zip(rec, order))
+        p = _profile(g)
+        drift, rows, snaps = 0, [], []
+        if p and (snaps := safe("snapshots", lambda: core.list_snapshots(p), [])):
+            rows = safe("binding drift", lambda: core.diff_snapshot(snaps[0], p)[0], [])
+            drift = len([r for r in rows if r.mapped])
+        crash = safe("crash log", lambda: logbook.crash_report(g), {"present": False, "time": None, "summary": ""})
+        crash_age = None
+        if crash["time"]:
+            crash_age = safe("crash log", lambda: (datetime.now() - datetime.fromisoformat(crash["time"])).days, None)
+        rs = safe("ReShade", lambda: graphics.reshade(g), {"installed": True})
+        bis = safe("crash finder", lambda: logbook.bisect_state(g), None)
+
+        drift_rows = rows if p and snaps else []
+        # every check: id (stable), fp (fingerprint of what it's about - an acknowledgement only holds while
+        # fp is unchanged, so a new crash or more drift brings it back), and one clear next step
+        add = lambda **c: checks.append({"detail": "", "action": None, "ack": True, **c})
+        if unsaved:
+            add(id="unsaved", fp="", sev="warn", ack=False, title="Unsaved load order changes in the Studio",
+                detail="The game still has the old order. Inspection is checking your Studio changes as if they were saved.",
+                action={"kind": "view", "view": "studio", "label": "Save or discard"})
+        if not p:
+            add(id="profile", fp="none", sev="warn", title="No profile yet", ack=False,
+                detail=f"Launch {g.title} once and create a profile. Controls and load order show up here after that.")
+        if missing:
+            add(id="missing", fp=_fp(missing), sev="crit", title=f"{len(missing)} active mod(s) aren't installed",
+                detail=", ".join(missing[:4]), action={"kind": "view", "view": "studio", "label": "Open Studio"})
+        if outdated:
+            add(id="outdated", fp=_fp(outdated + [ver or ""]), sev="warn",
+                title=f"{len(outdated)} active mod(s) not marked for {mods.short_version(ver)}",
+                detail=", ".join(outdated[:4]), action={"kind": "view", "view": "studio", "label": "Open Studio"})
+        if moves:
+            add(id="order", fp=_fp([e.package for e in order]), sev="warn",
+                title=f"Load order doesn't follow the mod authors' notes ({moves} moves)",
+                detail="Auto-sort proposes the fix. You review it, then save.",
+                action={"kind": "autosort", "label": "Fix with auto-sort"})
+        for a, o in pairs[:3]:
+            add(id=f"overlap:{a}:{o['other']}", fp=str(o["count"]), sev="info",
+                title=f"{self._name(by, a)} overrides {o['count']} files of {self._name(by, o['other'])}",
+                detail="Normal for add-ons. Only change it if the mod you want isn't working.",
+                action={"kind": "mod", "package": a, "label": "See files"})
+        if drift:
+            add(id="drift", fp=_fp([snaps[0].path.name] + [f"{r.name}={r.right}" for r in drift_rows if r.mapped]),
+                sev="warn", title=f"{drift} binding(s) changed since the last snapshot",
+                detail="Review what changed, then keep the new bindings or restore the old ones.",
+                action={"kind": "drift", "label": "Review changes"}, ack=False)
+        if crash["present"] and crash_age is not None and crash_age <= 14:
+            add(id="crash", fp=crash["time"], sev="crit" if crash_age <= 2 else "warn",
+                title=f"Crashed {self._ago(crash['time'])}", detail=crash["summary"],
+                action={"kind": "view", "view": "logbook", "label": "Crash details"})
+        if bis:
+            add(id="bisect", fp="running", sev="warn", title=f"Crash finder is running (round {bis['round']})",
+                detail="Some mods are switched off until you finish or stop it.", ack=False,
+                action={"kind": "view", "view": "logbook", "label": "Continue"})
+        clutter = safe("sync-conflict scan", lambda: cleanup.find_clutter(g), [])
+        if clutter:
+            add(id="clutter", fp=_fp(sorted(c.rel for c in clutter)), sev="warn",
+                title=f"{len(clutter)} sync-conflict leftover file(s) in the game folder",
+                detail="Copies like \"controls - Copy.sii\" or \"(# Name clash …)\" left by cloud sync. They can confuse the game.",
+                action={"kind": "view", "view": "cleanup", "label": "Clean up"})
+        for level, msg in (safe("profile health", lambda: cleanup.profile_health(p), []) if p else []):
+            if level == "bad":
+                add(id="profile-health", fp=msg, sev="crit", title="Profile is damaged", detail=msg, ack=False)
+        if not rs["installed"]:
+            add(id="reshade", fp="missing", sev="info", title="ReShade isn't installed",
+                detail="Optional. Sharpening and colour presets live in ATS/ETS2 Sync → ReShade.",
+                action={"kind": "view", "view": "twin", "label": "Open"} if len(owned()) > 1 else None)
+        if errors:
+            add(id="inspect-error", fp="", sev="warn", ack=False, title="Some checks couldn't run",
+                detail="; ".join(dict.fromkeys(errors)) + ". Nothing was changed.")
+        acks = _acks().get(k, {})
+        for c in checks:
+            c["acked"] = c["ack"] and acks.get(c["id"]) == c["fp"]
+        n_active = len([m for m in active if m])
+        return {
+            "gauges": {
+                "mods": {"value": n_active - len(outdated), "max": max(len(order), 1), "label": "Mods current",
+                         "text": f"{n_active - len(outdated)}/{len(order)}"},
+                "conflicts": {"value": len(pairs), "max": max(len(pairs), 6), "label": "File overlaps",
+                              "text": str(len(pairs))},
+                "drift": {"value": drift, "max": max(drift, 10), "label": "Binding drift", "text": str(drift)},
+                "crash": {"value": min(crash_age, 30) if crash_age is not None else 30, "max": 30,
+                          "label": "Days since crash",
+                          "text": str(crash_age) if crash_age is not None else "—"},
+            },
+            "checks": checks or [{"id": "ok", "sev": "ok", "title": "All clear", "detail": "Nothing needs attention.",
+                                  "action": None, "ack": False, "acked": False}], "version": ver, "active": len(order), "installed": len(ms),
+            "reshade": rs["installed"],
+            "overlaps": [{"winner": a, "winner_name": self._name(by, a), "loser": o["other"],
+                          "loser_name": self._name(by, o["other"]), "count": o["count"], "sample": o["sample"][:3]}
+                         for a, o in sorted(pairs, key=lambda x: -x[1]["count"])],
+        }
 
     def ack(self, key: str, check_id: str, fp: str) -> None:
         data = _acks()
@@ -368,7 +409,7 @@ class Api:
         return {"game": key, "version": ver, "mods": info, "order": [e.package for e in order],
                 "recommended": [e.package for e in rec], "overlaps": ov,
                 "groups": [{"key": gr.key, "title": gr.title} for gr in loadorder.GROUPS],
-                "running": core.is_running(g)}
+                "running": core.seems_running(g)}
 
     def recommend(self, key: str, order: list[str]) -> list[str]:
         """Auto-sort an unsaved order (groups + each author's load-order notes)."""
@@ -384,6 +425,8 @@ class Api:
 
     def save_order(self, key: str, order: list[str]) -> str:
         g = _g(key)
+        if logbook.bisect_state(g):  # stopping the crash finder puts its saved original back over this
+            raise RuntimeError("The crash finder is running. Finish or stop it in the Logbook first.")
         info = {m.package: m for m in self._mod_list(key)}
         current = {e.package: e for e in self._order(key)}
         entries = [current.get(p) or loadorder.Entry(p, info[p].display or info[p].name) for p in order]
@@ -403,11 +446,11 @@ class Api:
             data = None
             try:
                 if m.package_path.is_dir():
-                    f = m.package_path / m.icon
-                    data = f.read_bytes() if f.is_file() else None
+                    f = mods.inside(m.package_path, m.icon)
+                    data = f.read_bytes() if f and f.is_file() and f.stat().st_size <= _MAX_ICON else None
                 else:
                     with zipfile.ZipFile(m.package_path) as z:
-                        data = mods.zip_read(z, m.icon)
+                        data = mods.zip_read(z, m.icon, _MAX_ICON)
             except (OSError, KeyError, zipfile.BadZipFile):
                 data = None
             if data:
@@ -535,15 +578,18 @@ class Api:
         m = next((x for x in self._mod_list(key) if x.package == package), None)
         if not m:
             raise LookupError("That mod isn't installed any more.")
+        if logbook.bisect_state(_g(key)):
+            raise RuntimeError("The crash finder is running. Finish or stop it in the Logbook first.")
+        # take it out of the load order first: if removing then fails, the mod is just inactive, never dangling
+        active = [e.package for e in self._order(key)]
+        if package in active:
+            self.save_order(key, [x for x in active if x != package])
         if m.source == "workshop":
             steamugc.unsubscribe(_g(key), [m.workshop_id])
             msg = f"Unsubscribed from “{m.name}”. Steam removes the files."
         else:
             mods.remove(m)
             msg = f"“{m.name}” moved to the Recycle Bin."
-        active = [e.package for e in self._order(key)]
-        if package in active:  # don't leave a dangling entry in the profile's load order
-            self.save_order(key, [x for x in active if x != package])
         self._mods.pop(key, None)
         return msg
 

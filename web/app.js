@@ -273,7 +273,16 @@ async function renderPretrip(rescan = false) {
   const v = $("#view");
   if (!S.data.inspect || rescan) {
     if (!S.data.inspect) v.innerHTML = skeleton(2, 440);
-    const [ov, ins] = await Promise.all([api("overview"), api("inspect", Object.fromEntries(S.owned.filter(dirty).map(g => [g, S.staged[g]])))]);
+    let ov, ins;
+    try {
+      [ov, ins] = await Promise.all([api("overview"), api("inspect", Object.fromEntries(S.owned.filter(dirty).map(g => [g, S.staged[g]])))]);
+    } catch (e) {
+      if (S.view !== "pretrip") return;
+      v.innerHTML = `<section class="panel" style="padding:28px 24px;text-align:center"><div class="disp" style="font-size:20px">Inspection couldn't finish</div>
+        <div style="color:var(--muted);margin:8px 0 16px">${esc(String(e?.message || e))}. Nothing was changed.</div><button class="btn primary" id="retry">${I.gauge}Try again</button></section>`;
+      $("#retry").onclick = () => renderPretrip(true);
+      return;
+    }
     S.data.overview = ov; S.data.inspect = ins;
     if (S.view !== "pretrip") return;
   }
@@ -297,7 +306,10 @@ async function renderPretrip(rescan = false) {
       return `<section class="panel cluster" style="--c:${GAME[g].c}">
         <div class="glow"></div>
         <div class="cl-head"><span class="gamebadge" style="--c:${GAME[g].c}">${GAME[g].short}</span>
-          <div class="grow"><h2 class="disp">${GAME[g].title}</h2><div class="meta">${o.version ? "v" + esc(o.version) : "version unknown until next launch"} · ${esc(o.profile || "no profile")} · ${d.active} of ${d.installed} mods active · ReShade ${d.reshade ? "on" : "off"}</div></div>
+          <div class="grow"><h2 class="disp">${GAME[g].title}</h2><div class="meta">${o.version ? "v" + esc(o.version) : "version unknown until next launch"} · ${o.profiles?.length > 1
+            ? `<select class="profile-pick" data-profile="${g}" data-tip="Which ${GAME[g].short} profile Pre-Trip reads and changes">${o.profiles.map(p =>
+                `<option value="${esc(p.id)}" ${p.selected ? "selected" : ""}>${esc(p.label)}</option>`).join("")}</select>`
+            : esc(o.profile || "no profile")} · ${d.active} of ${d.installed} mods active · ReShade ${d.reshade ? "on" : "off"}</div></div>
           <button class="btn sm" data-launch="${g}" ${o.running ? "disabled" : ""}>${I.play}${o.running ? "Running" : "Launch"}</button></div>
         <div class="gauges">${Object.entries(d.gauges).map(([k, x]) => gaugeFor(k, x, g)).join("")}</div>
         <div class="checks">${(() => {
@@ -320,6 +332,14 @@ async function renderPretrip(rescan = false) {
     $$(".cluster", v).forEach(c => { const s = document.createElement("div"); s.className = "sweep"; c.append(s) });
     await renderPretrip(true); toast("Inspection complete.", "ok");
   };
+  $$("[data-profile]", v).forEach(sel => sel.onchange = async () => {
+    const g = sel.dataset.profile, prev = ov[g].profiles.find(p => p.selected)?.id;
+    if (dirty(g) && !await confirmBox({ title: "Switch profile?", body: "Your unsaved Studio load order changes are thrown away.",
+      target: `${GAME[g].short}'s game files aren't touched by switching.`, ok: "Switch" })) { sel.value = prev; return }
+    try { toast(await api("select_profile", g, sel.value), "ok") } catch (e) { sel.value = prev; return }
+    S.staged[g] = null; S.ov[g] = null; S.data.mods[g] = null; S.data.logbook[g] = null; S.data.loadouts[g] = null; S.data.twin = null;
+    renderPretrip(true);
+  });
   v.onclick = async e => {
     const gz = e.target.closest("[data-gauge]");
     if (gz) return gaugeClick(gz.dataset.g, gz.dataset.gauge);
@@ -730,7 +750,7 @@ function paintCleanup() {
       ${d.items.length ? `<div class="list">${d.items.map(i => `<div class="dl"><button class="cb ${sel.has(i.rel) ? "on" : ""}" data-rel="${esc(i.rel)}">${I.check}</button>
           <div style="min-width:0"><div class="nm mono" style="font-size:12.5px">${esc(i.rel)}</div><div class="mt">${kb(i.size)} · ${esc(fmtTime(i.modified))}</div></div><span></span></div>`).join("")}</div>
         <p style="color:var(--muted);font-size:12.5px;padding:0 16px 16px;margin:0">Cloud sync apps leave copies like “controls - Copy.sii” or “(# Name clash …)” next to the real files. Quarantine moves them to ${esc(d.quarantine)} with a list of where each came from. Nothing is deleted.</p>`
-        : `<div class="insync" style="padding:34px 20px"><div class="seal">${I.seal}</div><div class="disp" style="font-size:22px">All clean</div><div style="color:var(--muted)">No sync-conflict leftovers in ${GAME[g].title}'s folder.</div></div>`}
+        : `<div class="insync" style="padding:34px 20px"><div class="seal">${I.seal}</div><div class="disp" style="font-size:22px">No sync-conflict leftovers</div><div style="color:var(--muted)">No copies like "controls - Copy.sii" or "(# Name clash …)" in ${GAME[g].title}'s folder. This only checks for cloud-sync leftovers, not your mods or settings.</div></div>`}
     </section>`;
   $("#qopen").onclick = () => api("open_folder", g, "quarantine");
   v.onclick = async e => {

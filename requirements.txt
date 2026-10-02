@@ -1,6 +1,7 @@
-# Pre-Trip runtime dependencies (Windows, Python 3.12+)
-pywebview>=6.2        # native window with WebView2; pulls in pythonnet
-cryptography>=42      # reads the game's encrypted profile.sii
+# Pre-Trip runtime dependencies (Windows, Python 3.12+). Upper bounds keep a future major version from slipping into
+# a release build unreviewed; v1.0.1 was built with pywebview 6.2.1, cryptography 48.0.1, PyInstaller 6.22.3.
+pywebview>=6.2,<7        # native window with WebView2; pulls in pythonnet
+cryptography>=42,<49     # reads the game's encrypted profile.sii
 
 # building the exe (python build.py)
-pyinstaller>=6.10
+pyinstaller>=6.10,<7

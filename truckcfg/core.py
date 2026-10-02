@@ -39,9 +39,10 @@ class Profile:
     @property
     def name(self) -> str:
         try:
-            return bytes.fromhex(self.path.name).decode("utf-8")
+            name = bytes.fromhex(self.path.name).decode("utf-8")
         except ValueError:
             return self.path.name
+        return name if name.isprintable() and name.strip() else self.path.name
 
     @property
     def label(self) -> str:
@@ -65,6 +66,50 @@ def find_profiles(game: Game) -> list[Profile]:
     return out
 
 
+def profile_id(profile: Profile) -> str:
+    """Stable id: "steam_profiles/<hex>" or "profiles/<hex>" (the same name can exist in both)."""
+    return f"{profile.path.parent.name}/{profile.path.name}"
+
+
+def last_played(profile: Profile) -> float:
+    """When the game last saved anything for this profile."""
+    from truckcfg import loadorder  # local import: loadorder imports core
+    files = [profile.path / "controls.sii", profile.path / "config_local.cfg", loadorder.find_profile_sii(profile)]
+    return max((f.stat().st_mtime for f in files if f and f.is_file()), default=0.0)
+
+
+def _selected_file() -> Path:
+    return STORE / "selected_profiles.json"
+
+
+def _selected() -> dict:
+    try:
+        data = json.loads(_selected_file().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def active_profile(game: Game) -> Profile | None:
+    """The profile every read and write uses: the one picked in the app, else the one played most recently."""
+    ps = find_profiles(game)
+    if not ps:
+        return None
+    want = _selected().get(game.key)
+    return next((p for p in ps if profile_id(p) == want), None) or max(ps, key=last_played)
+
+
+def select_profile(game: Game, pid: str) -> Profile:
+    p = next((p for p in find_profiles(game) if profile_id(p) == pid), None)
+    if not p:
+        raise RuntimeError(f"That {game.title} profile isn't there any more.")
+    data = _selected()
+    data[game.key] = pid
+    _selected_file().parent.mkdir(parents=True, exist_ok=True)
+    write_text_atomic(_selected_file(), json.dumps(data, indent=1))
+    return p
+
+
 def control_files(folder: Path) -> list[Path]:
     return sorted(p for p in folder.iterdir() if p.is_file() and CONTROL_FILE_RE.match(p.name))
 
@@ -84,9 +129,24 @@ def controls_changed(profile: Profile) -> datetime:
 
 
 def is_running(game: Game) -> bool:
-    out = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {game.exe}", "/NH"],
-                         capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW).stdout
-    return game.exe.lower() in out.lower()
+    """Whether the game is open. Guards every write, so if Windows can't tell us, that's an error - never "not running"."""
+    try:
+        r = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {game.exe}", "/NH"], capture_output=True, text=True,
+                           timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise RuntimeError(f"Couldn't check whether {game.title} is running ({e}). Nothing was changed.") from e
+    if r.returncode != 0:
+        raise RuntimeError(f"Couldn't check whether {game.title} is running (tasklist exit {r.returncode}). "
+                           "Nothing was changed.")
+    return game.exe.lower() in (r.stdout or "").lower()
+
+
+def seems_running(game: Game) -> bool:
+    """For display only: is_running, with "can't tell" shown as running so the UI stays cautious."""
+    try:
+        return is_running(game)
+    except RuntimeError:
+        return True
 
 
 # ---------- bindings ----------
@@ -250,9 +310,15 @@ def list_snapshots(profile: Profile) -> list[Snapshot]:
     snaps = []
     for d in root.iterdir():
         mf = d / "meta.json"
-        if mf.is_file():
-            snaps.append(Snapshot(d, json.loads(mf.read_text(encoding="utf-8"))))
-    return sorted(snaps, key=lambda s: s.created, reverse=True)
+        try:  # one damaged snapshot must not hide the healthy ones
+            meta = json.loads(mf.read_text(encoding="utf-8")) if mf.is_file() else None
+        except (OSError, ValueError):
+            meta = None
+        if isinstance(meta, dict):
+            snaps.append((Snapshot(d, meta), mf.stat().st_mtime_ns))
+    # "created" has one-second resolution and a sync takes before+after snapshots in the same second: break ties by
+    # when meta.json was written (last), so snaps[0] is really the newest and drift isn't measured from "before"
+    return [s for s, _ in sorted(snaps, key=lambda x: (x[0].created, x[1]), reverse=True)]
 
 
 def diff_snapshot(snap: Snapshot, profile: Profile) -> tuple[list[DiffRow], list[str]]:

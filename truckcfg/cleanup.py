@@ -68,14 +68,17 @@ def quarantine(items: list[Clutter]) -> Path:
     for g in {c.game for c in items}:
         if core.is_running(g):
             raise RuntimeError(f"Close {g.title} first.")
-    dest_root = QUARANTINE / datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest_root = core.unused_path(QUARANTINE / datetime.now().strftime("%Y%m%d-%H%M%S"))
     moved = []
-    for c in items:
-        dest = dest_root / c.game.key / c.rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(c.path), dest)
-        moved.append({"from": str(c.path), "to": str(dest)})
-    (dest_root / "manifest.json").write_text(json.dumps(moved, indent=2), encoding="utf-8")
+    try:
+        for c in items:
+            dest = dest_root / c.game.key / c.rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(c.path), dest)
+            moved.append({"from": str(c.path), "to": str(dest)})
+    finally:  # even if one move fails, record the ones that happened so they can be put back
+        if moved:
+            (dest_root / "manifest.json").write_text(json.dumps(moved, indent=2), encoding="utf-8")
     return dest_root
 
 

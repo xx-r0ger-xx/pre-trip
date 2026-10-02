@@ -18,20 +18,41 @@ def _ts(p: Path) -> str:
     return datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds")
 
 
+def _profile(game: core.Game) -> core.Profile:
+    p = core.active_profile(game)
+    if not p:
+        raise RuntimeError(f"{game.title} has no profile yet. Launch it once and create one, then try again.")
+    return p
+
+
+def _profile_sii(p: core.Profile) -> Path:
+    path = loadorder.find_profile_sii(p)
+    if not path:
+        raise RuntimeError(f"No profile.sii found for {p.name}. Launch the game and load that profile once.")
+    return path
+
+
+def _backup_matches(d: Path, p: core.Profile, game: core.Game) -> bool:
+    """Load-order backups belong to one profile. Old ones (no id) only count when there's a single profile."""
+    owner = loadorder.backup_profile(d)
+    return owner == p.path.name if owner else len(core.find_profiles(game)) == 1
+
+
 # ---------- timeline ----------
 
 def events(game: core.Game) -> list[dict]:
     """Newest first. Events with a 'restore' key can be rolled back to."""
     out = []
     root = mods.game_dir(game)
-    for p in core.find_profiles(game)[:1]:
+    p = core.active_profile(game)
+    if p:
         for s in core.list_snapshots(p):
             label = s.meta.get("label") or "manual"
             out.append({"time": s.created, "kind": "controls", "title": f"Controls snapshot · {label}",
                         "detail": f"{len(s.meta.get('files', []))} control files",
                         "restore": {"type": "snapshot", "id": s.path.name}})
     for d in sorted((loadorder.BACKUPS / game.key).glob("*")):
-        if (d / "profile.sii").is_file():
+        if (d / "profile.sii").is_file() and p and _backup_matches(d, p, game):
             try:
                 n = len(loadorder.read_order(d / "profile.sii")[1])
             except Exception:  # noqa: BLE001 - an unreadable backup is still worth listing
@@ -59,20 +80,28 @@ def restore(game: core.Game, kind: str, ident: str) -> str:
     if core.is_running(game):
         raise RuntimeError(f"Close {game.title} first - it would overwrite the restored files when it exits.")
     if kind == "snapshot":
-        prof = core.find_profiles(game)[0]
-        snap = next(s for s in core.list_snapshots(prof) if s.path.name == ident)
+        prof = _profile(game)
+        snap = next((s for s in core.list_snapshots(prof) if s.path.name == ident), None)
+        if not snap:
+            raise RuntimeError("That snapshot is gone, or belongs to another profile.")
         core.restore_snapshot(snap, prof)
         return f"Controls restored from {snap.meta.get('label') or ident}. A safety snapshot was taken first."
     if kind == "profile":
-        target = loadorder.find_profile_sii(core.find_profiles(game)[0])
-        src = loadorder.BACKUPS / game.key / ident / "profile.sii"
-        loadorder.backup(target, game)
-        shutil.copy2(src, target)
-        return "Load order restored. The profile you had was backed up first."
+        prof = _profile(game)
+        target = _profile_sii(prof)
+        d = loadorder.BACKUPS / game.key / Path(ident).name
+        if not ((d / "profile.sii").is_file() and _backup_matches(d, prof, game)):
+            raise RuntimeError(f"That backup is gone, or belongs to a different profile than {prof.name}.")
+        # only the mod list comes back: the rest of profile.sii (stats, customisation) stays as the game last saved it
+        loadorder.write_order(target, game, loadorder.read_order(d / "profile.sii")[1])
+        return "Load order restored. The order you had was backed up first."
     if kind == "config":
         target = graphics.config_path(game)
-        src = target.with_name(ident)
-        shutil.copy2(target, core.unused_path(target.with_name(f"config.cfg.bak-{datetime.now():%Y%m%d-%H%M%S}")))
+        src = target.with_name(Path(ident).name)
+        if not (src.name.startswith("config.cfg.bak-") and src.is_file()):
+            raise RuntimeError("That graphics backup is gone.")
+        if target.is_file():
+            shutil.copy2(target, core.unused_path(target.with_name(f"config.cfg.bak-{datetime.now():%Y%m%d-%H%M%S}")))
         shutil.copy2(src, target)
         return "Graphics settings restored. Your current config.cfg was backed up first."
     raise ValueError(f"Unknown restore type {kind!r}")
@@ -146,21 +175,32 @@ def bisect_state(game: core.Game) -> dict | None:
         return None
 
 
+def _bisect_profile(game: core.Game, st: dict) -> Path:
+    """The crash finder keeps working on the profile it started on, even if another one is picked meanwhile."""
+    pid = st.get("profile")
+    p = next((p for p in core.find_profiles(game) if core.profile_id(p) == pid), None) if pid else _profile(game)
+    if not p:
+        raise RuntimeError("The profile the crash finder started on isn't there any more.")
+    return _profile_sii(p)
+
+
 def _apply(game: core.Game, st: dict) -> None:
     off = set(st["suspects"]) - set(st["testing"])
     order = [loadorder.Entry(p, d) for p, d in st["original"] if p not in off]
-    loadorder.write_order(loadorder.find_profile_sii(core.find_profiles(game)[0]), game, order)
+    loadorder.write_order(_bisect_profile(game, st), game, order)
     _state_path(game).parent.mkdir(parents=True, exist_ok=True)
     _state_path(game).write_text(json.dumps(st, indent=1), encoding="utf-8")
 
 
 def bisect_start(game: core.Game) -> dict:
-    path = loadorder.find_profile_sii(core.find_profiles(game)[0])
-    _, order = loadorder.read_order(path)
+    if bisect_state(game):  # starting again would save the half-disabled order as the "original"
+        raise RuntimeError("The crash finder is already running. Finish or stop it first.")
+    prof = _profile(game)
+    _, order = loadorder.read_order(_profile_sii(prof))
     if len(order) < 2:
         raise RuntimeError("You need at least two active mods for the crash finder to narrow anything down.")
     pk = [e.package for e in order]
-    st = {"started": datetime.now().isoformat(timespec="seconds"), "round": 1,
+    st = {"started": datetime.now().isoformat(timespec="seconds"), "round": 1, "profile": core.profile_id(prof),
           "original": [[e.package, e.display] for e in order], "suspects": pk, "testing": pk[: len(pk) // 2],
           "cleared": [], "culprit": None}
     _apply(game, st)
@@ -193,7 +233,7 @@ def bisect_stop(game: core.Game) -> None:
     if not st:
         return
     order = [loadorder.Entry(p, d) for p, d in st["original"]]
-    loadorder.write_order(loadorder.find_profile_sii(core.find_profiles(game)[0]), game, order)
+    loadorder.write_order(_bisect_profile(game, st), game, order)
     _state_path(game).unlink(missing_ok=True)
 
 

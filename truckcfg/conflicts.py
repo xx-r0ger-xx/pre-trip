@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import zipfile
 from pathlib import Path
 
 from truckcfg import core, mods
 
 CACHE = core.STORE / "file_index_cache.json"
+_LOCK = threading.Lock()  # pywebview runs each JS call on its own thread; ETS2 and ATS load at the same time
 # package furniture every mod has; overlapping on these means nothing
 _IGNORE_ROOT = {"manifest.sii", "versions.sii", "mod_description.txt", "description.txt"}
 _IGNORE_EXT = {".jpg", ".jpeg", ".png", ".txt", ".md", ".pdf", ".url"}
@@ -49,6 +51,11 @@ def _stamp(path: Path) -> str:
 
 def file_index(mod_list: list[mods.Mod]) -> dict[str, list[str] | None]:
     """package id -> content files. Cached on disk by path + modification time, so big Workshop folders scan once."""
+    with _LOCK:
+        return _file_index(mod_list)
+
+
+def _file_index(mod_list: list[mods.Mod]) -> dict[str, list[str] | None]:
     try:
         cache = json.loads(CACHE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -66,7 +73,7 @@ def file_index(mod_list: list[mods.Mod]) -> dict[str, list[str] | None]:
         out[m.package] = hit["files"]
     if dirty:
         CACHE.parent.mkdir(parents=True, exist_ok=True)
-        CACHE.write_text(json.dumps(cache), encoding="utf-8")
+        core.write_text_atomic(CACHE, json.dumps(cache))
     return out
 
 

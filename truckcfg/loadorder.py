@@ -268,7 +268,16 @@ def backup(path: Path, game: core.Game) -> Path:
     dest = core.unused_path(BACKUPS / game.key / datetime.now().strftime("%Y-%m-%d_%H%M%S"))
     dest.mkdir(parents=True)
     shutil.copy2(path, dest / path.name)
+    (dest / "profile.id").write_text(path.parent.name, encoding="utf-8")  # which profile this came from
     return dest
+
+
+def backup_profile(folder: Path) -> str | None:
+    """The profile folder name a backup was taken from (None for backups made before 1.0.1)."""
+    try:
+        return (folder / "profile.id").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
 
 
 def write_order(path: Path, game: core.Game, order: list[Entry]) -> Path:

@@ -162,6 +162,9 @@ class Sandbox:
 
         real_atomic, real_copy2, real_copytree, real_write_text, real_move = (core.write_text_atomic, shutil.copy2, shutil.copytree,
                                                                                Path.write_text, shutil.move)
+        real_rmtree, real_unlink = shutil.rmtree, Path.unlink
+        self._stack.enter_context(mock.patch("shutil.rmtree", lambda path, *a, **kw: (inside(path), real_rmtree(path, *a, **kw))[1]))
+        self._stack.enter_context(mock.patch.object(Path, "unlink", lambda self_, *a, **kw: (inside(self_), real_unlink(self_, *a, **kw))[1]))
         self._stack.enter_context(mock.patch("truckcfg.core.write_text_atomic",
                                              lambda path, text: (inside(path), real_atomic(path, text))[1]))
         self._stack.enter_context(mock.patch("shutil.copy2", lambda src, dst, **kw: (inside(dst), real_copy2(src, dst, **kw))[1]))

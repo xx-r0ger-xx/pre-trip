@@ -62,6 +62,30 @@ Set `PRETRIP_GAMES=ets2` (or `ats`) to preview the one-game experience on a PC t
 
 Tests: `python -m unittest discover -s tests`
 
+## Troubleshooting
+
+**"File 'manifest.sii' is encrypted, password required for extraction"** – fixed in 1.0.1, so update to the
+[latest release](../../releases/latest). Some mod authors mark their mods as password-protected to stop people
+unpacking them. The game ignores that, and now Pre-Trip does too. Nothing needs decrypting or repacking, and Pre-Trip
+never changes the mod file. If a mod's details really can't be read, it still shows up in Pre-Trip, just without its
+name, icon or description.
+
+**A check couldn't run** – if Inspection shows *"Some checks couldn't run"*, the rest of the page is still accurate.
+The message names the check and the reason, and nothing was changed.
+
+**What Cleanup does (and doesn't)** – Cleanup looks only for the duplicate files that cloud sync apps (OneDrive,
+Proton Drive, Dropbox, Google Drive) leave in the game's Documents folder when they clash with the game:
+
+- `controls - Copy.sii`, `controls - Copy (2).sii`
+- `profile (# Name clash 2026-09-29 abc123 #).sii`
+- `config-DESKTOP-ABC123.cfg`
+
+It skips the `mod`, `mod_disabled`, `cache`, `screenshot` and `music` folders. Matches are **moved, not deleted**, to
+`Documents\TruckSim-Configs\quarantine\<date-time>\`, and a `manifest.json` there lists each file's original
+location, so you can move any of them back by hand. Close the game first. *"No sync-conflict leftovers"* means only
+that: it isn't a verdict on your mods or settings (that's what Inspection is for). Cleanup isn't a general junk-file
+cleaner.
+
 ## Where things are stored
 
 `%USERPROFILE%\Documents\TruckSim-Configs` – controls snapshots, profile backups, loadouts, acknowledged

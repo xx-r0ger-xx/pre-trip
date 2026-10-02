@@ -57,8 +57,12 @@ def _run(game, action: str, workshop_ids: list[str]) -> None:
     os.close(fd)
     try:
         root = Path(__file__).resolve().parent.parent
-        r = subprocess.run(child_command([out, action, mods.STEAM_APP[game.key], str(dll.parent), *workshop_ids]),
-                           cwd=root, capture_output=True, text=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            r = subprocess.run(child_command([out, action, mods.STEAM_APP[game.key], str(dll.parent), *workshop_ids]),
+                               cwd=root, capture_output=True, text=True, timeout=60,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError("Steam didn't answer within a minute. Check Steam is running, then try again.") from e
         result = Path(out).read_text(encoding="utf-8").strip()
     finally:
         Path(out).unlink(missing_ok=True)
@@ -69,6 +73,9 @@ def _run(game, action: str, workshop_ids: list[str]) -> None:
 
 def main(argv: list[str]) -> int:
     """Child entry point: <result file> <sub|unsub> <appid> <dll dir> <ids...>. Writes OK or FAIL <reason>."""
+    if len(argv) < 5 or argv[1] not in ("sub", "unsub"):
+        print("usage: <result file> <sub|unsub> <appid> <dll dir> <ids...>", file=sys.stderr)
+        return 2
     out, action, appid, dll_dir, *ids = argv
     try:
         msg = _child(action, appid, dll_dir, [int(x) for x in ids])
